@@ -39,13 +39,12 @@ async function loadConfig() {
 
 function validateMinimalFields() {
   const required = {
-    merchantId: value("merchantId").trim(),
     amountMajor: value("amountMajor").trim(),
     currency: value("currency").trim()
   };
 
-  if (!required.merchantId || !required.amountMajor || !required.currency) {
-    throw new Error("Merchant ID, amount, and currency are required.");
+  if (!required.amountMajor || !required.currency) {
+    throw new Error("Amount and currency are required.");
   }
   if (!Number.isFinite(Number(required.amountMajor)) || Number(required.amountMajor) <= 0) {
     throw new Error("Amount must be a positive number.");

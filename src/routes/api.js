@@ -21,7 +21,7 @@ const { logInfo } = require("../utils/logger");
 const router = express.Router();
 
 const InitiatePaymentSchema = Joi.object({
-  merchantId: Joi.string().required(),
+  merchantId: Joi.string().allow("").default(""),
   amountMajor: Joi.number().positive().required(),
   currency: Joi.string().valid("840", "356", "064").required(),
   customerName: Joi.string().allow("").default(""),
@@ -135,8 +135,16 @@ router.post("/initiate", async (req, res) => {
   }
 
   try {
+    const submittedMerchantId = String(value.merchantId || "").trim();
+    if (submittedMerchantId && submittedMerchantId !== config.MERCHANT_ID) {
+      logInfo("UAT_INITIATE_MERCHANT_OVERRIDE", {
+        submittedMerchantId,
+        effectiveMerchantId: config.MERCHANT_ID
+      });
+    }
+
     const txn = createTransaction({
-      merchantId: value.merchantId,
+      merchantId: config.MERCHANT_ID,
       amountMajor: value.amountMajor,
       currency: value.currency,
       customerName: value.customerName,
