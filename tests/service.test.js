@@ -13,6 +13,7 @@ const {
   getTxDetail,
   toMinorUnits
 } = require("../src/services/transactionService");
+const { saveTransaction } = require("../src/storage/transactions");
 const { canonicalCallbackMacInput } = require("../src/cardzone/mpi");
 const { generateRsa2048KeyPair, signSha256WithRsa } = require("../src/crypto/rsa");
 
@@ -134,5 +135,21 @@ test("configured UAT merchant is authoritative", () => {
   expect(() =>
     createTransaction({ merchantId: "863990030700270", amountMajor: 1, currency: "840" })
   ).toThrow("merchantId must match configured UAT merchant: 863990035600270");
+});
+
+test("buildMpiReq aborts when mkReq pubkey differs from signing private key", async () => {
+  const txn = createTransaction({ merchantId: "863990035600270", amountMajor: 1, currency: "840" });
+  await runMkReq(txn.txnId);
+
+  const badKeys = generateRsa2048KeyPair();
+  const tampered = getTxDetail(txn.txnId);
+  tampered.mkReq.request.pubKey = badKeys.publicKeyBase64Url;
+  saveTransaction(tampered);
+
+  expect(() =>
+    buildMpiReq(txn.txnId, { cardNumber: "", expiry: "", cvv: "", responseType: "STRING" })
+  ).toThrow(
+    "Aborted: mkReq public key fingerprint does not match signing private-key-derived public key fingerprint."
+  );
 });
 

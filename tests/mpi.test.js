@@ -261,6 +261,30 @@ test("known Cardzone UAT vector produces exact canonical string", () => {
   expect(canonical).toBe("SALES863990035600270202609020448409045620260902044841840100");
 });
 
+test("canonical string remains exact for transaction 2026090207273400149", () => {
+  const fields = minimalFields({
+    MPI_TRANS_TYPE: "SALES",
+    MPI_MERC_ID: "863990035600270",
+    MPI_PAN: "",
+    MPI_CARD_HOLDER_NAME: "",
+    MPI_PAN_EXP: "",
+    MPI_CVV2: "",
+    MPI_TRXN_ID: "2026090207273400149",
+    MPI_ORI_TRXN_ID: "",
+    MPI_PURCH_DATE: "20260902012735",
+    MPI_PURCH_CURR: "840",
+    MPI_PURCH_AMT: "100",
+    MPI_RESPONSE_TYPE: "STRING"
+  });
+
+  const canonical = canonicalMpiMacInput(fields, {
+    includeResponseType: false,
+    purchaseDateTimezone: MPI_MAC_PURCHASE_DATE_TZ_ASIA_THIMPHU
+  });
+
+  expect(canonical).toBe("SALES863990035600270202609020727340014920260902072735840100");
+});
+
 test("regression vector capability builds canonical string without expected signature", () => {
   const fields = minimalFields({
     MPI_TRANS_TYPE: "SALES",

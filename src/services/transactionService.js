@@ -325,7 +325,7 @@ async function runMkReq(txnId) {
   const txn = loadTransaction(txnId);
   if (!txn) throw new Error("Transaction not found.");
 
-  const keys = keyRegistry.get(txnId) || loadOrGenerateKeys(txn);
+  const keys = getOrLoadKeyData(txn) || loadOrGenerateKeys(txn);
   const purchaseIdValidation = analyzePurchaseIdFormat(txn.txnId);
 
   txn.mkReq.purchaseIdValidation = purchaseIdValidation;
@@ -344,6 +344,9 @@ async function runMkReq(txnId) {
     purchaseId: txn.txnId,
     pubKey: keys.publicKeyBase64Url
   };
+
+  const mkReqPublicKeyFingerprint = fingerprintPublicKeyBase64Url(payload.pubKey);
+  txn.security.mkReqPubFingerprint = mkReqPublicKeyFingerprint;
 
   if (config.ENABLE_MKREQ_MAC) {
     throw new Error("ENABLE_MKREQ_MAC=true is not supported without explicit Cardzone mkReq MAC specification details.");
@@ -449,6 +452,38 @@ function buildMpiReq(txnId, cardInput) {
   const keyData = getOrLoadKeyData(txn);
   if (!keyData) {
     throw new Error("Signing key not found for transaction.");
+  }
+
+  const mkReqPublicKey = String(txn.mkReq?.request?.pubKey || "");
+  if (!mkReqPublicKey) {
+    throw new Error("mkReq public key is missing for transaction.");
+  }
+  const mkReqPublicKeyFingerprint = fingerprintPublicKeyBase64Url(mkReqPublicKey);
+
+  const signingDerived = derivePublicKeyFromPrivatePem(keyData.privateKeyPem);
+  const signingPrivateDerivedPublicKeyFingerprint = fingerprintPublicKeyBase64Url(
+    signingDerived.publicKeyBase64Url
+  );
+
+  const keyPairMatch = mkReqPublicKeyFingerprint === signingPrivateDerivedPublicKeyFingerprint;
+
+  logInfo("UAT_KEY_LIFECYCLE_CHECK", {
+    transactionId: txn.txnId,
+    MKREQ_PUBLIC_KEY_FINGERPRINT: mkReqPublicKeyFingerprint,
+    SIGNING_PRIVATE_DERIVED_PUBLIC_KEY_FINGERPRINT: signingPrivateDerivedPublicKeyFingerprint,
+    KEY_PAIR_MATCH: keyPairMatch
+  });
+
+  txn.security.mkReqPubFingerprint = mkReqPublicKeyFingerprint;
+  txn.security.signingPubFingerprint = signingPrivateDerivedPublicKeyFingerprint;
+  txn.security.keyMatch = keyPairMatch;
+
+  if (!keyPairMatch) {
+    txn.timeline.macGenerated = "FAIL";
+    txn.status = "FAILED";
+    txn.finalResult = "KEY_PAIR_MISMATCH";
+    saveTransaction(txn);
+    throw new Error("Aborted: mkReq public key fingerprint does not match signing private-key-derived public key fingerprint.");
   }
 
   const responseType = (cardInput.responseType || "STRING").toUpperCase();
