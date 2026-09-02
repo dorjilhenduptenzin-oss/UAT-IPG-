@@ -1,0 +1,86 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>CARDZONE 3DS/IPG UAT Test Tool</title>
+    <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
+    <link rel="stylesheet" href="/styles.css" />
+  </head>
+  <body>
+    <header class="top">
+      <div>
+        <h1>CARDZONE 3DS / IPG</h1>
+        <h2>BANK OF BHUTAN — UAT TEST TOOL</h2>
+      </div>
+      <div class="pill-group">
+        <span id="envPill" class="pill danger">Environment: UAT</span>
+        <span id="merchantPill" class="pill">Merchant ID: -</span>
+        <span id="statusPill" class="pill">Status: Minimal Mode Ready</span>
+        <span id="modePill" class="pill">Mode: -</span>
+      </div>
+    </header>
+
+    <main>
+      <form method="POST" action="/api/initiate" id="checkoutForm">
+      <section class="card">
+        <h3>Minimal Required Fields</h3>
+        <p class="note">
+          Enter only required fields, then click <strong>Redirect to 3DS (UAT)</strong>. The tool will
+          generate transaction and order ID, run mkReq, build MPIReq/MPI_MAC, and redirect directly.
+          Card details are entered on Cardzone hosted page.
+        </p>
+        <div class="row-3">
+          <label>Merchant ID<input id="merchantId" name="merchantId" type="text" /></label>
+          <label>Amount (major)<input id="amountMajor" name="amountMajor" type="number" step="0.01" value="1.00" /></label>
+          <label>Currency
+            <select id="currency" name="currency">
+              <option value="840">USD 840</option>
+              <option value="356">INR 356</option>
+              <option value="064">BTN 064</option>
+            </select>
+          </label>
+        </div>
+
+        <div class="actions">
+          <button id="loadUsd" type="button">Load USD Test Data</button>
+          <button id="loadInr" type="button">Load INR Test Data</button>
+          <button id="loadBtn" type="button">Load Bhutan Test Data</button>
+          <button id="redirect3ds" type="submit" class="primary">Redirect to 3DS (UAT)</button>
+        </div>
+      </section>
+
+      <section class="card">
+        <h3>Optional Fields</h3>
+        <div class="row-3">
+          <label>Card Holder Name<input id="cardHolderName" name="cardHolderName" type="text" /></label>
+          <label>Customer Name<input id="customerName" name="customerName" type="text" /></label>
+          <label>Email<input id="customerEmail" name="customerEmail" type="email" /></label>
+        </div>
+        <div class="row-3">
+          <label>Mobile Phone<input id="mobilePhone" name="mobilePhone" type="text" /></label>
+          <label>MPI Response Type
+            <select id="responseType" name="responseType">
+              <option value="STRING">STRING</option>
+              <option value="JSON">JSON</option>
+            </select>
+          </label>
+          <label>Return URL<input id="returnUrl" name="responseUrl" type="text" placeholder="http://localhost:4001/api/return" /></label>
+        </div>
+      </section>
+      </form>
+
+      <section class="card">
+        <h3>Flow Status</h3>
+        <pre id="flow"></pre>
+      </section>
+
+      <section class="card">
+        <h3>Raw API Output</h3>
+        <pre id="raw"></pre>
+      </section>
+    </main>
+
+    <script src="/app.js"></script>
+  </body>
+</html>
