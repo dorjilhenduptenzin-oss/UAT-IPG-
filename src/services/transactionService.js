@@ -200,8 +200,11 @@ function createTransaction(input) {
   if (requestedMerchantId && !allowedMerchants.has(requestedMerchantId)) {
     throw new Error(`merchantId must match configured UAT merchant: ${config.MERCHANT_ID} or 863990026500270`);
   }
-  const returnBaseUrl = String(input.returnBaseUrl || config.RETURN_BASE_URL).replace(/\/+$/, "");
-  const responseUrl = input.responseUrl || `${returnBaseUrl}/api/return?txnId=${txnId}`;
+  const callbackBaseUrl = String(config.CALLBACK_BASE_URL || "https://uatipg.vercel.app").replace(/\/+$/, "");
+  const returnBaseUrl = String(input.returnBaseUrl || config.RETURN_BASE_URL || "https://uatipg.vercel.app").replace(/\/+$/, "");
+  const cardzoneCallbackUrl = `${callbackBaseUrl}/api/callback`;
+  const cardzoneBrowserReturnUrl = `${returnBaseUrl}/api/return?txnId=${txnId}`;
+  const responseUrl = cardzoneCallbackUrl;
 
   const txn = {
     txnId,
@@ -213,6 +216,8 @@ function createTransaction(input) {
     currency,
     currencyAlpha: CURRENCY_CONFIG[currency].alpha,
     responseUrl,
+    callbackUrl: cardzoneCallbackUrl,
+    browserReturnUrl: cardzoneBrowserReturnUrl,
     environment: config.ENVIRONMENT,
     mode: config.MODE,
     createdAt: now.toISOString(),
@@ -249,10 +254,27 @@ function createTransaction(input) {
 
   saveTransaction(txn);
 
+  logInfo("INIT", {
+    transactionId: txn.txnId,
+    merchantId: txn.merchantId,
+    amountMajor: txn.amountMajor,
+    currency: txn.currency
+  });
+
+  logInfo("CARDZONE_CALLBACK_URL", {
+    transactionId: txn.txnId,
+    callbackUrl: cardzoneCallbackUrl
+  });
+
+  logInfo("CARDZONE_BROWSER_RETURN_URL", {
+    transactionId: txn.txnId,
+    browserReturnUrl: cardzoneBrowserReturnUrl
+  });
+
   logInfo("CALLBACK_URL_SENT_TO_CARDZONE", {
     transactionId: txn.txnId,
     merchantId: txn.merchantId,
-    callbackUrl: `${config.CALLBACK_BASE_URL}/api/callback`
+    callbackUrl: cardzoneCallbackUrl
   });
 
   return txn;
@@ -738,6 +760,18 @@ function generateHostedFormHtml(txnId) {
   txn.timestamps.hostedFormGeneratedAt = new Date().toISOString();
   saveTransaction(txn);
 
+  logInfo("HOSTED_FORM_GENERATED", {
+    transactionId: txn.txnId
+  });
+  logInfo("CARDZONE_CALLBACK_URL", {
+    transactionId: txn.txnId,
+    callbackUrl: txn.callbackUrl || `${String(config.CALLBACK_BASE_URL).replace(/\/+$/, "")}/api/callback`
+  });
+  logInfo("CARDZONE_BROWSER_RETURN_URL", {
+    transactionId: txn.txnId,
+    browserReturnUrl: txn.browserReturnUrl || `${String(config.RETURN_BASE_URL).replace(/\/+$/, "")}/api/return?txnId=${txn.txnId}`
+  });
+
     return `<!doctype html>
   <html>
   <head><meta charset=\"utf-8\" /><title>Cardzone UAT Redirect</title></head>
@@ -1193,5 +1227,7 @@ module.exports = {
   exportSafeDiagnostic,
   toMinorUnits,
   saveUatPrivateKeyIfGenerated,
+  loadTxnPrivateKey,
+  getOrLoadKeyData,
   CURRENCY_CONFIG
 };

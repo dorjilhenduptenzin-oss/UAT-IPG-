@@ -380,12 +380,21 @@ router.get("/transactions/:txnId/hosted-form", (req, res) => {
 
 router.post("/callback", (req, res) => {
   try {
+    console.log("[INFO] CALLBACK_ROUTE_HIT=true");
     logInfo("CALLBACK_ROUTE_HIT", {
-      method: "POST",
+      routeHit: true,
+      method: req.method,
       contentType: req.headers["content-type"] || "",
       bodyKeys: Object.keys(req.body || {}),
       ip: req.ip || ""
     });
+    logInfo("CALLBACK_METHOD", { method: req.method });
+    logInfo("CALLBACK_CONTENT_TYPE", { contentType: req.headers["content-type"] || "" });
+
+    // Allow harmless test/diagnostic ping requests
+    if (req.body?.ping || req.body?.test || req.query?.ping || req.query?.test) {
+      return res.json({ ok: true, ping: true, message: "Callback endpoint reachable" });
+    }
 
     const { error, value } = CallbackSchema.validate(req.body || {}, { abortEarly: false });
     if (error) {

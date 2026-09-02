@@ -1,7 +1,9 @@
-const request = require("supertest");
-
 process.env.MODE = "MOCK";
 
+const request = require("supertest");
+const { signSha256WithRsa } = require("../src/crypto/rsa");
+const { canonicalCallbackMacInput } = require("../src/cardzone/mpi");
+const { loadTxnPrivateKey } = require("../src/services/transactionService");
 const app = require("../src/app");
 
 test("GET /health returns environment metadata", async () => {
@@ -85,5 +87,66 @@ test("POST /api/return records untrusted browser return and redirects to GET /ap
   const getReturnRes = await request(app).get(`/api/return?txnId=${encodeURIComponent(txnId)}`);
   expect(getReturnRes.status).toBe(200);
   expect(getReturnRes.text).toContain("Payment Result");
+});
+
+test("POST /api/callback responds to ping and handles verified callback before return", async () => {
+  // Test harmless diagnostic ping
+  const pingRes = await request(app)
+    .post("/api/callback")
+    .set("Content-Type", "application/json")
+    .send({ ping: true });
+  expect(pingRes.status).toBe(200);
+  expect(pingRes.body.ok).toBe(true);
+
+  // Test full flow with trusted callback
+  const createRes = await request(app).post("/api/transactions").send({
+    merchantId: "863990035600270",
+    amountMajor: 1.0,
+    currency: "840"
+  });
+  expect(createRes.status).toBe(201);
+  const txnId = createRes.body.txnId;
+
+  const mkReqRes = await request(app).post(`/api/transactions/${encodeURIComponent(txnId)}/mkreq`);
+  expect(mkReqRes.status).toBe(200);
+
+  const mpireqRes = await request(app)
+    .post(`/api/transactions/${encodeURIComponent(txnId)}/mpireq`)
+    .send({ cardNumber: "", expiry: "", cvv: "", responseType: "STRING" });
+  expect(mpireqRes.status).toBe(200);
+
+  const privKey = loadTxnPrivateKey(txnId);
+  const callbackFields = {
+    MPI_MERC_ID: "863990035600270",
+    MPI_TRXN_ID: txnId,
+    MPI_ERROR_CODE: "000",
+    MPI_APPR_CODE: "APPR01",
+    MPI_RRN: "RRN123",
+    MPI_BIN: "411111",
+    MPI_REFERRAL_CODE: "",
+    MPI_CARDHOLDER_INFO: ""
+  };
+  const macInput = canonicalCallbackMacInput(callbackFields);
+  const signature = signSha256WithRsa(privKey, macInput);
+
+  // Callback arrives from Cardzone
+  const callbackRes = await request(app)
+    .post("/api/callback")
+    .set("Content-Type", "application/x-www-form-urlencoded")
+    .send(
+      `MPI_MERC_ID=863990035600270&MPI_TRXN_ID=${encodeURIComponent(txnId)}&MPI_ERROR_CODE=000&MPI_APPR_CODE=APPR01&MPI_RRN=RRN123&MPI_BIN=411111&MPI_REFERRAL_CODE=&MPI_MAC=${encodeURIComponent(signature)}`
+    );
+  expect(callbackRes.status).toBe(200);
+  expect(callbackRes.body.ok).toBe(true);
+
+  // Browser return loads saved callback
+  const returnRes = await request(app).get(`/api/return?txnId=${encodeURIComponent(txnId)}`);
+  expect(returnRes.status).toBe(200);
+  expect(returnRes.text).toContain("Approved");
+
+  const txRes = await request(app).get(`/api/tx/${encodeURIComponent(txnId)}`);
+  expect(txRes.status).toBe(200);
+  expect(txRes.body.status).toBe("SUCCESS");
+  expect(txRes.body.finalResult.source).toBe("callback");
 });
 
