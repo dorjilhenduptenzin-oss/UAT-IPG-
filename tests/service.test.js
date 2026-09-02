@@ -213,3 +213,45 @@ test("buildMpiReq aborts when mkReq pubkey differs from signing private key", as
   );
 });
 
+test("verified callback saves trusted final result and priority over inquiry", async () => {
+  const txn = createTransaction({ merchantId: "863990035600270", amountMajor: 1, currency: "840" });
+  await runMkReq(txn.txnId);
+
+  // Generate valid callback signature
+  const callbackFields = {
+    MPI_MERC_ID: "863990035600270",
+    MPI_TRXN_ID: txn.txnId,
+    MPI_ERROR_CODE: "000",
+    MPI_ERROR_DESC: "Approved",
+    MPI_APPR_CODE: "APPR123",
+    MPI_RRN: "RRN456",
+    MPI_BIN: "411111",
+    MPI_REFERRAL_CODE: "REF789",
+    MPI_CARDHOLDER_INFO: "AUTH_OK"
+  };
+
+  const storedTxn = getTxDetail(txn.txnId);
+  // In mock mode, cardzonePublicKey is generated. Let's sign using the mock private key for the mock cardzone key pair if available or simulate verified
+  const input = canonicalCallbackMacInput(callbackFields);
+  const keyPair = generateRsa2048KeyPair();
+  storedTxn.mkReq.cardzonePublicKey = keyPair.publicKeyBase64Url;
+  saveTransaction(storedTxn);
+
+  const mac = signSha256WithRsa(keyPair.privateKeyPem, input);
+  callbackFields.MPI_MAC = mac;
+
+  const processed = processCallback(callbackFields);
+  expect(processed.callbackReceived).toBe(true);
+  expect(processed.callbackMacVerified).toBe(true);
+  expect(processed.status).toBe("SUCCESS");
+  expect(processed.finalResult.source).toBe("callback");
+  expect(processed.finalResult.approvalCode).toBe("APPR123");
+  expect(processed.finalResult.rrn).toBe("RRN456");
+  expect(processed.finalResult.bin).toBe("411111");
+
+  // Running inquiry afterwards should NOT overwrite the trusted callback finalResult
+  const afterInq = await runInquiry(txn.txnId);
+  expect(afterInq.finalResult.source).toBe("callback");
+  expect(afterInq.status).toBe("SUCCESS");
+});
+

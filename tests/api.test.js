@@ -46,7 +46,7 @@ test("POST /api/callback parses payload and updates transaction state", async ()
   expect(txRes.body.callback.fields.MPI_TRXN_ID).toBe(txnId);
 });
 
-test("POST /api/return with Cardzone error sets provisional failed status without inquiry override", async () => {
+test("POST /api/return records untrusted browser return and redirects to GET /api/return", async () => {
   const createRes = await request(app).post("/api/transactions").send({
     merchantId: "863990035600270",
     amountMajor: 1.0,
@@ -63,9 +63,6 @@ test("POST /api/return with Cardzone error sets provisional failed status withou
     .send({ cardNumber: "", expiry: "", cvv: "", responseType: "STRING" });
   expect(mpireqRes.status).toBe(200);
 
-  const hostedRes = await request(app).get(`/api/transactions/${encodeURIComponent(txnId)}/hosted-form`);
-  expect(hostedRes.status).toBe(200);
-
   const returnRes = await request(app)
     .post("/api/return")
     .set("referer", "https://uatczsecure.bob.bt/3dss/mercReq")
@@ -76,12 +73,17 @@ test("POST /api/return with Cardzone error sets provisional failed status withou
     );
 
   expect(returnRes.status).toBe(303);
+  expect(returnRes.headers.location).toBe(`/api/return?txnId=${encodeURIComponent(txnId)}`);
 
   const txRes = await request(app).get(`/api/tx/${encodeURIComponent(txnId)}`);
   expect(txRes.status).toBe(200);
-  expect(txRes.body.status).toBe("FAILED");
-  expect(txRes.body.finalResult).toBe("BROWSER_RETURN_ERROR_305");
-  expect(txRes.body.mpiResult).toBe("305");
-  expect(txRes.body.timeline.final).toBe("FAIL");
+  expect(txRes.body.cardzoneReturn).toBeDefined();
+  expect(txRes.body.cardzoneReturn.fields.MPI_ERROR_CODE).toBe("305");
+  expect(txRes.body.diagnostics.browserReturn.untrusted).toBe(true);
+
+  // GET /api/return should render the return page with diagnostic details
+  const getReturnRes = await request(app).get(`/api/return?txnId=${encodeURIComponent(txnId)}`);
+  expect(getReturnRes.status).toBe(200);
+  expect(getReturnRes.text).toContain("Payment Result");
 });
 

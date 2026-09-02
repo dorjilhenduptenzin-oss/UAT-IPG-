@@ -248,6 +248,13 @@ function createTransaction(input) {
   };
 
   saveTransaction(txn);
+
+  logInfo("CALLBACK_URL_SENT_TO_CARDZONE", {
+    transactionId: txn.txnId,
+    merchantId: txn.merchantId,
+    callbackUrl: `${config.CALLBACK_BASE_URL}/api/callback`
+  });
+
   return txn;
 }
 
@@ -456,10 +463,7 @@ function buildInquiryPurchaseId(originalTxnId) {
   if (!digits) {
     throw new Error("Cannot build inquiry purchaseId: original transaction ID is missing.");
   }
-  if (digits.length <= 19) {
-    return `${digits}1`;
-  }
-  return digits.slice(0, 20);
+  return generateTransactionId();
 }
 
 function buildMpiReq(txnId, cardInput) {
@@ -755,24 +759,36 @@ function escapeHtml(v) {
 }
 
 function processCallback(formData, metadata = {}) {
-  const txnId = formData.MPI_TRXN_ID;
+  const txnId = String(formData.MPI_TRXN_ID || "").trim();
   const txn = loadTransaction(txnId);
   if (!txn) {
     throw new Error("Callback transaction not found.");
   }
 
   const callbackFields = {
-    MPI_MERC_ID: formData.MPI_MERC_ID || "",
-    MPI_TRXN_ID: formData.MPI_TRXN_ID || "",
-    MPI_MAC: formData.MPI_MAC || "",
-    MPI_ERROR_CODE: formData.MPI_ERROR_CODE || "",
-    MPI_ERROR_DESC: formData.MPI_ERROR_DESC || "",
-    MPI_APPR_CODE: formData.MPI_APPR_CODE || "",
-    MPI_RRN: formData.MPI_RRN || "",
-    MPI_BIN: formData.MPI_BIN || "",
-    MPI_REFERRAL_CODE: formData.MPI_REFERRAL_CODE || "",
-    MPI_CARDHOLDER_INFO: formData.MPI_CARDHOLDER_INFO || ""
+    MPI_MERC_ID: String(formData.MPI_MERC_ID || "").trim(),
+    MPI_TRXN_ID: String(formData.MPI_TRXN_ID || "").trim(),
+    MPI_MAC: String(formData.MPI_MAC || "").trim(),
+    MPI_ERROR_CODE: String(formData.MPI_ERROR_CODE || "").trim(),
+    MPI_ERROR_DESC: String(formData.MPI_ERROR_DESC || "").trim(),
+    MPI_APPR_CODE: String(formData.MPI_APPR_CODE || "").trim(),
+    MPI_RRN: String(formData.MPI_RRN || "").trim(),
+    MPI_BIN: String(formData.MPI_BIN || "").trim(),
+    MPI_REFERRAL_CODE: String(formData.MPI_REFERRAL_CODE || "").trim(),
+    MPI_CARDHOLDER_INFO: String(formData.MPI_CARDHOLDER_INFO || "").trim()
   };
+
+  logInfo("CALLBACK_MPI_TRXN_ID", { transactionId: txnId });
+  logInfo("CALLBACK_MPI_ERROR_CODE", {
+    transactionId: txnId,
+    errorCode: callbackFields.MPI_ERROR_CODE,
+    errorDesc: callbackFields.MPI_ERROR_DESC
+  });
+  logInfo("CALLBACK_MPI_MAC_PRESENT", {
+    transactionId: txnId,
+    macPresent: Boolean(callbackFields.MPI_MAC),
+    macLength: callbackFields.MPI_MAC ? callbackFields.MPI_MAC.length : 0
+  });
 
   txn.callback.receivedAt = new Date().toISOString();
   txn.timestamps.callbackReceivedAt = txn.callback.receivedAt;
@@ -782,32 +798,55 @@ function processCallback(formData, metadata = {}) {
   txn.callback.source = metadata.source || "unknown";
   txn.callbackStatus = "RECEIVED";
   txn.timeline.callbackReceived = "PASS";
+  txn.callbackReceived = true;
 
-  const cardzonePub = txn.mkReq.cardzonePublicKey || txn.mkReq.request.pubKey;
+  const cardzonePub = txn.mkReq?.cardzonePublicKey || txn.mkReq?.request?.pubKey;
   const verified = verifyCallbackMac(cardzonePub, callbackFields, callbackFields.MPI_MAC);
   txn.callback.macVerified = verified.ok;
+  txn.callbackMacVerified = verified.ok;
   txn.callback.macInputHash = verified.inputHash;
   txn.callback.macInputLength = verified.input.length;
   txn.timestamps.callbackMacVerifiedAt = new Date().toISOString();
   txn.timeline.callbackMacVerified = verified.ok ? "PASS" : "FAIL";
 
-  if (callbackFields.MPI_ERROR_CODE === "000" && verified.ok) {
-    txn.status = "SUCCESS";
-    txn.finalResult = "APPROVED";
-    txn.mpiResult = "SUCCESS";
-    txn.timeline.final = "PASS";
-    txn.timestamps.finalAt = new Date().toISOString();
-  } else if (!callbackFields.MPI_ERROR_CODE) {
-    txn.status = "PENDING";
-    txn.finalResult = "CALLBACK_PENDING_RESULT";
-    txn.mpiResult = "PENDING";
-    txn.timeline.final = "PENDING";
-  } else if (callbackFields.MPI_ERROR_CODE === "5A0") {
+  logInfo("CALLBACK_MAC_VERIFIED", {
+    transactionId: txnId,
+    macVerified: verified.ok,
+    macInputHash: verified.inputHash
+  });
+
+  const responseCode = callbackFields.MPI_ERROR_CODE;
+  const responseDescription = callbackFields.MPI_ERROR_DESC;
+  const approvalCode = callbackFields.MPI_APPR_CODE;
+  const rrn = callbackFields.MPI_RRN;
+  const bin = callbackFields.MPI_BIN;
+  const referralCode = callbackFields.MPI_REFERRAL_CODE;
+  const cardholderInfo = callbackFields.MPI_CARDHOLDER_INFO;
+
+  txn.responseCode = responseCode;
+  txn.responseDescription = responseDescription;
+  txn.approvalCode = approvalCode;
+  txn.RRN = rrn;
+  txn.BIN = bin;
+  txn.referralCode = referralCode;
+  txn.cardholderInfo = cardholderInfo;
+
+  txn.callback.callbackReceived = true;
+  txn.callback.callbackMacVerified = verified.ok;
+  txn.callback.responseCode = responseCode;
+  txn.callback.responseDescription = responseDescription;
+  txn.callback.approvalCode = approvalCode;
+  txn.callback.RRN = rrn;
+  txn.callback.BIN = bin;
+  txn.callback.referralCode = referralCode;
+  txn.callback.cardholderInfo = cardholderInfo;
+
+  const resolvedAt = new Date().toISOString();
+
+  if (responseCode === "5A0") {
     txn.status = "FAILED";
-    txn.finalResult = "MAC_VERIFICATION_FAILED_AT_CARDZONE";
     txn.mpiResult = "5A0";
     txn.timeline.final = "FAIL";
-    txn.timestamps.finalAt = new Date().toISOString();
     txn.diagnostics.cardzone5A0 = {
       title: "MAC verification failed at Cardzone.",
       explanation: "The merchant generated a locally valid signature, but Cardzone did not accept it.",
@@ -815,19 +854,80 @@ function processCallback(formData, metadata = {}) {
       merchantId: txn.merchantId,
       mkReqStatus: txn.timeline.mkreqResponse,
       publicKeyFingerprint: txn.security.mkReqPubFingerprint,
-      macInputSha256: txn.mpiReq.signInputHash,
-      macInputLength: txn.mpiReq.signInputLength,
-      mpiMacLength: txn.mpiReq.mpiMacLength,
+      macInputSha256: txn.mpiReq?.signInputHash,
+      macInputLength: txn.mpiReq?.signInputLength,
+      mpiMacLength: txn.mpiReq?.mpiMacLength,
       keyPairMatch: txn.security.keyMatch,
-      formSubmissionCheck: txn.outboundMercReq.formSubmissionCheck
+      formSubmissionCheck: txn.outboundMercReq?.formSubmissionCheck
     };
+    txn.finalResult = {
+      source: "callback",
+      status: "FAILED",
+      responseCode: "5A0",
+      responseDescription: responseDescription || "MAC verification failed at Cardzone",
+      approvalCode,
+      rrn,
+      bin,
+      referralCode,
+      cardholderInfo,
+      resolvedAt
+    };
+    txn.timestamps.finalAt = resolvedAt;
+  } else if (verified.ok) {
+    if (responseCode === "000" && Boolean(approvalCode)) {
+      txn.status = "SUCCESS";
+      txn.mpiResult = "SUCCESS";
+      txn.timeline.final = "PASS";
+    } else if (responseCode === "000") {
+      txn.status = "SUCCESS";
+      txn.mpiResult = "SUCCESS";
+      txn.timeline.final = "PASS";
+    } else {
+      txn.status = "FAILED";
+      txn.mpiResult = responseCode || "UNKNOWN";
+      txn.timeline.final = "FAIL";
+    }
+
+    txn.finalResult = {
+      source: "callback",
+      status: txn.status,
+      responseCode,
+      responseDescription,
+      approvalCode,
+      rrn,
+      bin,
+      referralCode,
+      cardholderInfo,
+      resolvedAt
+    };
+    txn.timestamps.finalAt = resolvedAt;
   } else {
     txn.status = "FAILED";
-    txn.finalResult = "DECLINED_OR_ERROR";
-    txn.mpiResult = callbackFields.MPI_ERROR_CODE || "UNKNOWN";
+    txn.mpiResult = "CALLBACK_MAC_INVALID";
     txn.timeline.final = "FAIL";
-    txn.timestamps.finalAt = new Date().toISOString();
+    txn.finalResult = {
+      source: "callback",
+      status: "FAILED",
+      responseCode,
+      responseDescription,
+      approvalCode,
+      rrn,
+      bin,
+      referralCode,
+      cardholderInfo,
+      error: "CALLBACK_MAC_INVALID",
+      resolvedAt
+    };
+    txn.timestamps.finalAt = resolvedAt;
   }
+
+  logInfo("CALLBACK_RESULT_SAVED", {
+    transactionId: txnId,
+    status: txn.status,
+    source: "callback",
+    macVerified: verified.ok,
+    saved: true
+  });
 
   saveTransaction(txn);
   return txn;
@@ -842,6 +942,8 @@ async function runInquiry(txnId) {
     throw new Error("Cannot run inquiry: signing key is missing in runtime.");
   }
 
+  logInfo("INQUIRY_STARTED", { transactionId: txnId });
+
   const inquiryPurchaseId = buildInquiryPurchaseId(txnId);
   const reqFields = {
     MPI_TRANS_TYPE: "INQ",
@@ -851,7 +953,7 @@ async function runInquiry(txnId) {
     MPI_PAN_EXP: "",
     MPI_CVV2: "",
     MPI_TRXN_ID: inquiryPurchaseId,
-    MPI_ORI_TRXN_ID: txnId,
+    MPI_ORI_TRXN_ID: txn.txnId,
     MPI_PURCH_DATE: formatUtcPurchaseDate(),
     MPI_PURCH_CURR: "",
     MPI_PURCH_AMT: "",
@@ -880,6 +982,12 @@ async function runInquiry(txnId) {
     MPI_LINE_ITEM: "",
     MPI_RESPONSE_TYPE: "STRING"
   };
+
+  logInfo("INQUIRY_ORIGINAL_TRANSACTION_ID", {
+    transactionId: txnId,
+    originalTxnId: txn.txnId,
+    inquiryTxnId: inquiryPurchaseId
+  });
 
   const mac = generateMpiMac(keyData.privateKeyPem, reqFields, MAC_WIRE_PURCHASE_DATE_OPTIONS);
   reqFields.MPI_MAC = mac.signature;
@@ -915,29 +1023,60 @@ async function runInquiry(txnId) {
     txn.inquiry.result = classifyInquiryOutcome(txn.inquiry.response);
   }
 
+  logInfo("INQUIRY_RESULT_CODE", {
+    transactionId: txnId,
+    outcome: txn.inquiry.result?.outcome,
+    code: txn.inquiry.result?.code
+  });
+
+  logInfo("INQUIRY_MAC_VERIFIED", {
+    transactionId: txnId,
+    inquiryMacVerified: Boolean(txn.inquiry.macVerified)
+  });
+
   txn.timeline.inquiryResult = txn.inquiry.result?.outcome || "NOT RUN";
   txn.timeline.inquiry = "PASS";
   txn.timestamps.inquiryAt = new Date().toISOString();
 
-  if (!txn.callback?.macVerified) {
+  // Priority 1 is verified callback. If callback MAC is not verified, apply inquiry result (Priority 2)
+  if (!txn.callback?.macVerified && !txn.callbackMacVerified) {
     const outcome = txn.inquiry.result?.outcome;
+    const resolvedAt = new Date().toISOString();
     if (outcome === "SUCCESS") {
       txn.status = "SUCCESS";
-      txn.finalResult = "INQUIRY_SUCCESS";
       txn.mpiResult = "SUCCESS";
       txn.timeline.final = "PASS";
-      txn.timestamps.finalAt = new Date().toISOString();
+      txn.finalResult = {
+        source: "inquiry",
+        status: "SUCCESS",
+        responseCode: txn.inquiry.result?.code || "000",
+        responseDescription: txn.inquiry.result?.description || "Inquiry Approved",
+        resolvedAt
+      };
+      txn.timestamps.finalAt = resolvedAt;
     } else if (outcome === "FAILED") {
       txn.status = "FAILED";
-      txn.finalResult = `INQUIRY_FAILED_${txn.inquiry.result?.code || "UNKNOWN"}`;
       txn.mpiResult = txn.inquiry.result?.code || "UNKNOWN";
       txn.timeline.final = "FAIL";
-      txn.timestamps.finalAt = new Date().toISOString();
+      txn.finalResult = {
+        source: "inquiry",
+        status: "FAILED",
+        responseCode: txn.inquiry.result?.code || "UNKNOWN",
+        responseDescription: txn.inquiry.result?.description || "Inquiry Failed",
+        resolvedAt
+      };
+      txn.timestamps.finalAt = resolvedAt;
     } else {
       txn.status = "PENDING";
-      txn.finalResult = `INQUIRY_${outcome || "PENDING"}`;
       txn.mpiResult = "PENDING";
       txn.timeline.final = "PENDING";
+      txn.finalResult = {
+        source: "inquiry",
+        status: "PENDING",
+        responseCode: txn.inquiry.result?.code || "",
+        responseDescription: txn.inquiry.result?.description || "Inquiry Pending",
+        resolvedAt
+      };
     }
   }
 
