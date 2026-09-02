@@ -9,56 +9,24 @@ const apiRoutes = require("./routes/api");
 
 const app = express();
 
-function getDevConnectSrcOrigins() {
-  const origins = new Set(["'self'", "http://localhost:4001", "http://127.0.0.1:4001"]);
-  try {
-    const callbackOrigin = new URL(config.CALLBACK_BASE_URL).origin;
-    origins.add(callbackOrigin);
-  } catch {
-    // Ignore invalid callback URL; fallback to localhost origins only.
-  }
-  try {
-    const returnOrigin = new URL(config.RETURN_BASE_URL).origin;
-    origins.add(returnOrigin);
-  } catch {
-    // Ignore invalid return URL; fallback to localhost origins only.
-  }
-  return Array.from(origins);
-}
-
 function buildCspHeaderValue() {
-  const isProduction = process.env.NODE_ENV === "production";
-  if (isProduction) {
-    return [
-      "default-src 'self'",
-      "base-uri 'self'",
-      "connect-src 'self'",
-      "script-src 'self'",
-      "style-src 'self' 'unsafe-inline'",
-      "img-src 'self' data:",
-      "font-src 'self'",
-      "form-action 'self' https://uatczsecure.bob.bt",
-      "frame-ancestors 'none'"
-    ].join("; ");
-  }
-
-  const connectSrc = getDevConnectSrcOrigins().join(" ");
   return [
-    "default-src 'self'",
+    "default-src 'self' 'unsafe-inline'",
     "base-uri 'self'",
-    "connect-src " + connectSrc,
-    "script-src 'self'",
+    "connect-src * 'self' data: blob:",
+    "script-src 'self' 'unsafe-inline' 'unsafe-eval'",
     "style-src 'self' 'unsafe-inline'",
-    "img-src 'self' data:",
-    "font-src 'self'",
+    "img-src * 'self' data: blob:",
+    "font-src 'self' data:",
     "form-action 'self' https://uatczsecure.bob.bt",
-    "frame-ancestors 'self'"
+    "frame-ancestors *"
   ].join("; ");
 }
 
 app.use(
   helmet({
-    contentSecurityPolicy: false
+    contentSecurityPolicy: false,
+    frameguard: false
   })
 );
 app.use((req, res, next) => {

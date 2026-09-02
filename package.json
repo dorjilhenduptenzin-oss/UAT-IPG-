@@ -4,8 +4,8 @@
   "description": "",
   "main": "src/server.js",
   "scripts": {
-    "start": "node src/server.js",
-    "dev": "nodemon src/server.js",
+    "start": "node server.js",
+    "dev": "node server.js",
     "test": "jest --runInBand",
     "lint": "eslint src public tests",
     "build": "node -e \"console.log('No build step required for this Node/Express app')\""

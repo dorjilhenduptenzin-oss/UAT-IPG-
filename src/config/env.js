@@ -42,7 +42,7 @@ const config = Object.freeze({
     process.env.VERCEL_GIT_COMMIT_SHA ||
     process.env.npm_package_version ||
     "dev",
-  PORT: toInt(process.env.PORT, 3000),
+  PORT: 3000,
   BIND_HOST: process.env.BIND_HOST || "0.0.0.0",
   MERCHANT_ID: process.env.MERCHANT_ID || UAT_MERCHANT_ID,
   CALLBACK_BASE_URL:

@@ -1,0 +1,6 @@
+{
+  "name": "Cardzone 3DS UAT Test Tool",
+  "description": "Bank of Bhutan Cardzone 3DS and IPG UAT test and transaction simulation tool",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
