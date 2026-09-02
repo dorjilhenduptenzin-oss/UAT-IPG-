@@ -169,6 +169,8 @@ function createTransaction(input) {
   const currency = normalizeCurrencyCode(input.currency || "840");
   const amountMajor = Number(input.amountMajor || 1.0).toFixed(2);
   const amountMinor = toMinorUnits(amountMajor, currency);
+  const returnBaseUrl = String(input.returnBaseUrl || config.RETURN_BASE_URL).replace(/\/+$/, "");
+  const responseUrl = input.responseUrl || `${returnBaseUrl}/api/return?txnId=${txnId}`;
 
   const txn = {
     txnId,
@@ -178,7 +180,7 @@ function createTransaction(input) {
     amountMajor,
     currency,
     currencyAlpha: CURRENCY_CONFIG[currency].alpha,
-    responseUrl: input.responseUrl || `${config.RETURN_BASE_URL}/api/return?txnId=${txnId}`,
+    responseUrl,
     environment: config.ENVIRONMENT,
     mode: config.MODE,
     createdAt: new Date().toISOString(),

@@ -92,6 +92,40 @@ const CallbackSchema = CardzoneMPIResSchema;
 
 const InquirySchema = Joi.object({}).unknown(true);
 
+function getRequestOrigin(req) {
+  const forwardedProto = String(req.headers["x-forwarded-proto"] || "")
+    .split(",")[0]
+    .trim();
+  const forwardedHost = String(req.headers["x-forwarded-host"] || "")
+    .split(",")[0]
+    .trim();
+
+  if (forwardedProto && forwardedHost) {
+    return `${forwardedProto}://${forwardedHost}`;
+  }
+
+  return `${req.protocol}://${req.get("host")}`;
+}
+
+function shouldPreferRequestReturnBase() {
+  if (process.env.VERCEL || process.env.AWS_LAMBDA_FUNCTION_NAME || process.env.LAMBDA_TASK_ROOT) {
+    return true;
+  }
+
+  try {
+    const hostname = new URL(config.RETURN_BASE_URL).hostname;
+    return hostname === "localhost" || hostname === "127.0.0.1";
+  } catch {
+    return true;
+  }
+}
+
+function resolveReturnBaseUrl(req, explicitResponseUrl) {
+  if (explicitResponseUrl) return undefined;
+  if (!shouldPreferRequestReturnBase()) return undefined;
+  return getRequestOrigin(req);
+}
+
 router.post("/initiate", async (req, res) => {
   console.log("[INITIATE_KEYS]", Object.keys(req.body || {}));
   const { error, value } = InitiatePaymentSchema.validate(req.body || {}, { abortEarly: false });
@@ -107,7 +141,8 @@ router.post("/initiate", async (req, res) => {
       customerName: value.customerName,
       customerEmail: value.customerEmail || value.email || "",
       mobilePhone: value.mobilePhone,
-      responseUrl: value.responseUrl
+      responseUrl: value.responseUrl,
+      returnBaseUrl: resolveReturnBaseUrl(req, value.responseUrl)
     });
 
     const afterMk = await runMkReq(txn.txnId);
@@ -302,7 +337,10 @@ router.post("/transactions", (req, res) => {
   if (error) {
     return res.status(400).json({ error: error.message });
   }
-  const txn = createTransaction(value);
+  const txn = createTransaction({
+    ...value,
+    returnBaseUrl: resolveReturnBaseUrl(req, value.responseUrl)
+  });
   return res.status(201).json(txn);
 });
 
