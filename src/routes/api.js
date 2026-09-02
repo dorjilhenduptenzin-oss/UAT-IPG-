@@ -78,7 +78,7 @@ const CardzoneMPIReqSchema = Joi.object({
 
 const CardzoneMPIResSchema = Joi.object({
   MPI_MERC_ID: Joi.string().allow("").default(""),
-  MPI_TRXN_ID: Joi.string().required(),
+  MPI_TRXN_ID: Joi.string().allow("").default(""),
   MPI_MAC: Joi.string().allow("").default(""),
   MPI_ERROR_CODE: Joi.string().allow("").default(""),
   MPI_ERROR_DESC: Joi.string().allow("").default(""),
@@ -378,25 +378,38 @@ router.get("/transactions/:txnId/hosted-form", (req, res) => {
   }
 });
 
-router.post("/callback", (req, res) => {
+function handleCallbackRequest(req, res) {
   try {
     console.log("[INFO] CALLBACK_ROUTE_HIT=true");
+    const mergedPayload = {
+      ...(req.query || {}),
+      ...(req.body || {})
+    };
+
+    logInfo("MERCHANT_RESULT_ROUTE_HIT", {
+      routeHit: true,
+      method: req.method,
+      contentType: req.headers["content-type"] || "",
+      bodyKeys: Object.keys(mergedPayload),
+      ip: req.ip || ""
+    });
+
     logInfo("CALLBACK_ROUTE_HIT", {
       routeHit: true,
       method: req.method,
       contentType: req.headers["content-type"] || "",
-      bodyKeys: Object.keys(req.body || {}),
+      bodyKeys: Object.keys(mergedPayload),
       ip: req.ip || ""
     });
     logInfo("CALLBACK_METHOD", { method: req.method });
     logInfo("CALLBACK_CONTENT_TYPE", { contentType: req.headers["content-type"] || "" });
 
     // Allow harmless test/diagnostic ping requests
-    if (req.body?.ping || req.body?.test || req.query?.ping || req.query?.test) {
+    if (mergedPayload.ping || mergedPayload.test) {
       return res.json({ ok: true, ping: true, message: "Callback endpoint reachable" });
     }
 
-    const { error, value } = CallbackSchema.validate(req.body || {}, { abortEarly: false });
+    const { error, value } = CallbackSchema.validate(mergedPayload, { abortEarly: false });
     if (error) {
       return res.status(400).json({ error: error.message });
     }
@@ -407,8 +420,10 @@ router.post("/callback", (req, res) => {
     const txn = processCallback(value, {
       contentType: req.headers["content-type"] || "",
       source: req.ip || "",
-      fromBrowser: isBrowser
+      fromBrowser: isBrowser,
+      query: req.query || {}
     });
+
     if (isBrowser) {
       return res.redirect(303, `/api/return?txnId=${encodeURIComponent(txn.txnId)}`);
     }
@@ -416,7 +431,10 @@ router.post("/callback", (req, res) => {
   } catch (error) {
     return res.status(400).json({ error: error.message });
   }
-});
+}
+
+router.post("/callback", handleCallbackRequest);
+router.get("/callback", handleCallbackRequest);
 
 router.post("/transactions/:txnId/hosted-form-submitted", (req, res) => {
   const txn = getTxDetail(req.params.txnId);

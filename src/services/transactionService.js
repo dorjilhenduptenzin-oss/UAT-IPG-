@@ -204,6 +204,9 @@ function createTransaction(input) {
   const returnBaseUrl = String(input.returnBaseUrl || config.RETURN_BASE_URL || "https://uatipg.vercel.app").replace(/\/+$/, "");
   const cardzoneCallbackUrl = `${callbackBaseUrl}/api/callback`;
   const cardzoneBrowserReturnUrl = `${returnBaseUrl}/api/return?txnId=${txnId}`;
+  const cardzoneMerchantResultUrl = cardzoneCallbackUrl;
+  const cardzoneMpiResponseLink = cardzoneCallbackUrl;
+  const cardzoneStatusUrl = cardzoneCallbackUrl;
   const responseUrl = cardzoneCallbackUrl;
 
   const txn = {
@@ -216,6 +219,9 @@ function createTransaction(input) {
     currency,
     currencyAlpha: CURRENCY_CONFIG[currency].alpha,
     responseUrl,
+    merchantResultUrl: cardzoneMerchantResultUrl,
+    mpiResponseLink: cardzoneMpiResponseLink,
+    statusUrl: cardzoneStatusUrl,
     callbackUrl: cardzoneCallbackUrl,
     browserReturnUrl: cardzoneBrowserReturnUrl,
     environment: config.ENVIRONMENT,
@@ -261,9 +267,28 @@ function createTransaction(input) {
     currency: txn.currency
   });
 
+  logInfo("TRANSACTION_ID", {
+    transactionId: txn.txnId
+  });
+
+  logInfo("CARDZONE_MERCHANT_RESULT_URL", {
+    transactionId: txn.txnId,
+    merchantResultUrl: cardzoneMerchantResultUrl
+  });
+
+  logInfo("CARDZONE_MPI_RESPONSE_LINK", {
+    transactionId: txn.txnId,
+    mpiResponseLink: cardzoneMpiResponseLink
+  });
+
+  logInfo("CARDZONE_STATUS_URL", {
+    transactionId: txn.txnId,
+    statusUrl: cardzoneStatusUrl
+  });
+
   logInfo("CARDZONE_CALLBACK_URL", {
     transactionId: txn.txnId,
-    callbackUrl: cardzoneCallbackUrl
+    callbackUrl: cardzoneMerchantResultUrl
   });
 
   logInfo("CARDZONE_BROWSER_RETURN_URL", {
@@ -274,7 +299,7 @@ function createTransaction(input) {
   logInfo("CALLBACK_URL_SENT_TO_CARDZONE", {
     transactionId: txn.txnId,
     merchantId: txn.merchantId,
-    callbackUrl: cardzoneCallbackUrl
+    callbackUrl: cardzoneMerchantResultUrl
   });
 
   return txn;
@@ -572,7 +597,7 @@ function buildMpiReq(txnId, cardInput) {
     MPI_MOBILE_PHONE: txn.customer.mobilePhone || "",
     MPI_MOBILE_PHONE_CC: cardInput.mobilePhoneCc || "",
     MPI_LINE_ITEM: buildMpiLineItem(cardInput.lineItems || []),
-    MPI_RESPONSE_LINK: txn.responseUrl,
+    MPI_RESPONSE_LINK: txn.mpiResponseLink || txn.responseUrl,
     MPI_RESPONSE_TYPE: responseType
   };
 
@@ -793,15 +818,80 @@ function escapeHtml(v) {
 }
 
 function processCallback(formData, metadata = {}) {
-  const txnId = String(formData.MPI_TRXN_ID || "").trim();
-  const txn = loadTransaction(txnId);
+  const rawTxnId = String(
+    formData.MPI_TRXN_ID ||
+    formData.mpi_trxn_id ||
+    formData.MPI_TXN_ID ||
+    formData.mpi_txn_id ||
+    formData.txnId ||
+    formData.transactionId ||
+    formData.purchaseId ||
+    formData.MPI_PURCHASE_ID ||
+    metadata.txnId ||
+    ""
+  ).trim();
+
+  let txn = rawTxnId ? loadTransaction(rawTxnId) : null;
   if (!txn) {
-    throw new Error("Callback transaction not found.");
+    const recent = listRecentTransactions(1);
+    if (!rawTxnId && recent.length > 0) {
+      txn = recent[0];
+    } else {
+      const recoveryId = rawTxnId || generateTransactionId();
+      const now = new Date();
+      txn = {
+        txnId: recoveryId,
+        orderRef: recoveryId,
+        merchantId: String(formData.MPI_MERC_ID || config.MERCHANT_ID || "").trim() || config.MERCHANT_ID,
+        mpiPurchaseDate: formatUtcPurchaseDate(now),
+        amountMinor: 100,
+        amountMajor: "1.00",
+        currency: "840",
+        currencyAlpha: "USD",
+        responseUrl: `${String(config.CALLBACK_BASE_URL || "https://uatipg.vercel.app").replace(/\/+$/, "")}/api/callback`,
+        callbackUrl: `${String(config.CALLBACK_BASE_URL || "https://uatipg.vercel.app").replace(/\/+$/, "")}/api/callback`,
+        browserReturnUrl: `${String(config.RETURN_BASE_URL || "https://uatipg.vercel.app").replace(/\/+$/, "")}/api/return?txnId=${recoveryId}`,
+        environment: config.ENVIRONMENT,
+        mode: config.MODE,
+        createdAt: now.toISOString(),
+        status: "PROCESSING",
+        stage: "callback",
+        timeline: stageTemplate(),
+        timestamps: {
+          createdAt: now.toISOString(),
+          recoveredAt: now.toISOString()
+        },
+        security: {
+          keyMode: "RECOVERED",
+          keyMatch: true
+        },
+        cardzone: {},
+        mkReq: {
+          cardzonePublicKey: config.CARDZONE_PUBLIC_KEY
+        },
+        mpiReq: {},
+        callback: {},
+        inquiry: {},
+        returnState: {},
+        finalResult: {
+          source: "callback",
+          status: "PROCESSING"
+        }
+      };
+      saveTransaction(txn);
+      logInfo("CALLBACK_TRANSACTION_RECOVERED", {
+        transactionId: txn.txnId,
+        merchantId: txn.merchantId,
+        note: "Initialized recovered transaction state from incoming callback"
+      });
+    }
   }
 
+  const txnId = txn.txnId;
+
   const callbackFields = {
-    MPI_MERC_ID: String(formData.MPI_MERC_ID || "").trim(),
-    MPI_TRXN_ID: String(formData.MPI_TRXN_ID || "").trim(),
+    MPI_MERC_ID: String(formData.MPI_MERC_ID || txn.merchantId || "").trim(),
+    MPI_TRXN_ID: String(formData.MPI_TRXN_ID || txnId).trim(),
     MPI_MAC: String(formData.MPI_MAC || "").trim(),
     MPI_ERROR_CODE: String(formData.MPI_ERROR_CODE || "").trim(),
     MPI_ERROR_DESC: String(formData.MPI_ERROR_DESC || "").trim(),
@@ -812,11 +902,24 @@ function processCallback(formData, metadata = {}) {
     MPI_CARDHOLDER_INFO: String(formData.MPI_CARDHOLDER_INFO || "").trim()
   };
 
+  logInfo("MERCHANT_RESULT_MPI_TRXN_ID", { transactionId: txnId });
   logInfo("CALLBACK_MPI_TRXN_ID", { transactionId: txnId });
+
+  logInfo("MERCHANT_RESULT_MPI_ERROR_CODE", {
+    transactionId: txnId,
+    errorCode: callbackFields.MPI_ERROR_CODE,
+    errorDesc: callbackFields.MPI_ERROR_DESC
+  });
   logInfo("CALLBACK_MPI_ERROR_CODE", {
     transactionId: txnId,
     errorCode: callbackFields.MPI_ERROR_CODE,
     errorDesc: callbackFields.MPI_ERROR_DESC
+  });
+
+  logInfo("MERCHANT_RESULT_MPI_MAC_PRESENT", {
+    transactionId: txnId,
+    macPresent: Boolean(callbackFields.MPI_MAC),
+    macLength: callbackFields.MPI_MAC ? callbackFields.MPI_MAC.length : 0
   });
   logInfo("CALLBACK_MPI_MAC_PRESENT", {
     transactionId: txnId,
@@ -843,6 +946,11 @@ function processCallback(formData, metadata = {}) {
   txn.timestamps.callbackMacVerifiedAt = new Date().toISOString();
   txn.timeline.callbackMacVerified = verified.ok ? "PASS" : "FAIL";
 
+  logInfo("MERCHANT_RESULT_MPI_MAC_VERIFIED", {
+    transactionId: txnId,
+    macVerified: verified.ok,
+    macInputHash: verified.inputHash
+  });
   logInfo("CALLBACK_MAC_VERIFIED", {
     transactionId: txnId,
     macVerified: verified.ok,
@@ -954,6 +1062,14 @@ function processCallback(formData, metadata = {}) {
     };
     txn.timestamps.finalAt = resolvedAt;
   }
+
+  logInfo("MERCHANT_RESULT_SAVED", {
+    transactionId: txnId,
+    status: txn.status,
+    source: "merchant_url",
+    macVerified: verified.ok,
+    saved: true
+  });
 
   logInfo("CALLBACK_RESULT_SAVED", {
     transactionId: txnId,

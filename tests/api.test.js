@@ -150,3 +150,20 @@ test("POST /api/callback responds to ping and handles verified callback before r
   expect(txRes.body.finalResult.source).toBe("callback");
 });
 
+test("POST /api/callback gracefully handles unknown/uninitialized transaction IDs", async () => {
+  const unknownTxnId = "2026090299999900001";
+  const callbackRes = await request(app)
+    .post("/api/callback")
+    .set("Content-Type", "application/x-www-form-urlencoded")
+    .send(
+      `MPI_MERC_ID=863990035600270&MPI_TRXN_ID=${unknownTxnId}&MPI_ERROR_CODE=000&MPI_APPR_CODE=APPR99&MPI_RRN=RRN999`
+    );
+  expect(callbackRes.status).toBe(200);
+  expect(callbackRes.body.ok).toBe(true);
+  expect(callbackRes.body.txnId).toBe(unknownTxnId);
+
+  const txRes = await request(app).get(`/api/tx/${unknownTxnId}`);
+  expect(txRes.status).toBe(200);
+  expect(txRes.body.txnId).toBe(unknownTxnId);
+});
+

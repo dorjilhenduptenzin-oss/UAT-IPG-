@@ -50,18 +50,30 @@ function signSha256WithRsa(privateKeyPem, utf8Input) {
 }
 
 function verifySha256WithRsa(publicKeyDerBase64Url, utf8Input, signatureBase64Url) {
-  const verifier = crypto.createVerify("RSA-SHA256");
-  verifier.update(utf8Input, "utf8");
-  verifier.end();
-  const pubDer = fromBase64Url(publicKeyDerBase64Url);
-  const pubObj = crypto.createPublicKey({ key: pubDer, format: "der", type: "spki" });
-  const signatureBuffer = fromBase64Url(signatureBase64Url);
-  return verifier.verify(pubObj, signatureBuffer);
+  try {
+    if (!publicKeyDerBase64Url || !signatureBase64Url) {
+      return false;
+    }
+    const verifier = crypto.createVerify("RSA-SHA256");
+    verifier.update(utf8Input || "", "utf8");
+    verifier.end();
+    const pubDer = fromBase64Url(publicKeyDerBase64Url);
+    const pubObj = crypto.createPublicKey({ key: pubDer, format: "der", type: "spki" });
+    const signatureBuffer = fromBase64Url(signatureBase64Url);
+    return verifier.verify(pubObj, signatureBuffer);
+  } catch {
+    return false;
+  }
 }
 
 function fingerprintPublicKeyBase64Url(publicKeyBase64Url) {
-  const derBuffer = fromBase64Url(publicKeyBase64Url);
-  return crypto.createHash("sha256").update(derBuffer).digest("hex");
+  try {
+    if (!publicKeyBase64Url) return "";
+    const derBuffer = fromBase64Url(publicKeyBase64Url);
+    return crypto.createHash("sha256").update(derBuffer).digest("hex");
+  } catch {
+    return "";
+  }
 }
 
 module.exports = {
