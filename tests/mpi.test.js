@@ -162,6 +162,14 @@ test("purchase date is exactly 14 digits and not UTC formatted", () => {
   expect(formatted).not.toBe(wire);
 });
 
+test("canonical purchase date equals wire date when timezone transform is disabled", () => {
+  const wire = "20260902030711";
+  const formatted = canonicalMpiPurchaseDateForCardzoneMac(wire, {
+    purchaseDateTimezone: null
+  });
+  expect(formatted).toBe(wire);
+});
+
 test("changing purchase date changes MPI_MAC", () => {
   const keys = generateRsa2048KeyPair();
   const first = minimalFields({

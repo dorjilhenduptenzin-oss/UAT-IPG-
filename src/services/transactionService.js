@@ -32,6 +32,7 @@ const {
 
 const keyRegistry = new Map();
 const runtimeMpiRegistry = new Map();
+const MAC_WIRE_PURCHASE_DATE_OPTIONS = Object.freeze({ purchaseDateTimezone: null });
 
 const CURRENCY_CONFIG = Object.freeze({
   "840": { alpha: "USD", minorDigits: 2 },
@@ -543,7 +544,7 @@ function buildMpiReq(txnId, cardInput) {
     MPI_RESPONSE_TYPE: responseType
   };
 
-  const mac = generateMpiMac(keyData.privateKeyPem, mpiFields);
+  const mac = generateMpiMac(keyData.privateKeyPem, mpiFields, MAC_WIRE_PURCHASE_DATE_OPTIONS);
   mpiFields.MPI_MAC = mac.signature;
 
   const localVerify = verifySha256WithRsa(
@@ -561,7 +562,10 @@ function buildMpiReq(txnId, cardInput) {
     DERIVED_PUBLIC_KEY_FINGERPRINT: signingPrivateDerivedPublicKeyFingerprint
   });
 
-  const macCanonicalPurchaseDate = canonicalMpiPurchaseDateForCardzoneMac(wirePurchaseDate);
+  const macCanonicalPurchaseDate = canonicalMpiPurchaseDateForCardzoneMac(
+    wirePurchaseDate,
+    MAC_WIRE_PURCHASE_DATE_OPTIONS
+  );
   logInfo("UAT_MPI_MAC_DEBUG", {
     transactionId: txn.txnId,
     merchantId: txn.merchantId,
@@ -595,8 +599,8 @@ function buildMpiReq(txnId, cardInput) {
     signInputHash: mac.inputHash,
     mpiMac: mac.signature,
     mpiMacLength: mac.signature.length,
-    signedValueHash: sha256Hex(canonicalMpiMacInput(mpiFields)),
-    submittedValueHash: sha256Hex(canonicalMpiMacInput(mpiFields))
+    signedValueHash: sha256Hex(canonicalMpiMacInput(mpiFields, MAC_WIRE_PURCHASE_DATE_OPTIONS)),
+    submittedValueHash: sha256Hex(canonicalMpiMacInput(mpiFields, MAC_WIRE_PURCHASE_DATE_OPTIONS))
   };
 
   txn.diagnostics.localMacProof = {
@@ -658,9 +662,10 @@ function generateHostedFormHtml(txnId) {
     macInputHash: txn.mpiReq.signInputHash,
     keyFingerprint: txn.security.mkReqPubFingerprint,
     signedValueHash: txn.mpiReq.signedValueHash,
-    submittedValueHash: sha256Hex(canonicalMpiMacInput(runtimeFields)),
+    submittedValueHash: sha256Hex(canonicalMpiMacInput(runtimeFields, MAC_WIRE_PURCHASE_DATE_OPTIONS)),
     formSubmissionCheck:
-      txn.mpiReq.signedValueHash === sha256Hex(canonicalMpiMacInput(runtimeFields))
+      txn.mpiReq.signedValueHash ===
+      sha256Hex(canonicalMpiMacInput(runtimeFields, MAC_WIRE_PURCHASE_DATE_OPTIONS))
         ? "MATCH"
         : "MISMATCH"
   };
@@ -673,8 +678,14 @@ function generateHostedFormHtml(txnId) {
   const hostedFormPurchaseDate = String(runtimeFields.MPI_PURCH_DATE || "");
   const formPurchaseDateEqualsStoredWireDate =
     hostedFormPurchaseDate === storedWirePurchaseDate;
-  const macCanonicalPurchaseDate = canonicalMpiPurchaseDateForCardzoneMac(storedWirePurchaseDate);
-  const mpiMacCanonicalString = canonicalMpiMacInput(runtimeFields);
+  const macCanonicalPurchaseDate = canonicalMpiPurchaseDateForCardzoneMac(
+    storedWirePurchaseDate,
+    MAC_WIRE_PURCHASE_DATE_OPTIONS
+  );
+  const mpiMacCanonicalString = canonicalMpiMacInput(
+    runtimeFields,
+    MAC_WIRE_PURCHASE_DATE_OPTIONS
+  );
 
   logInfo("UAT_FINAL_HTML_FORM_VALUES", {
     transactionId: txn.txnId,
@@ -864,7 +875,7 @@ async function runInquiry(txnId) {
     MPI_RESPONSE_TYPE: "STRING"
   };
 
-  const mac = generateMpiMac(keyData.privateKeyPem, reqFields);
+  const mac = generateMpiMac(keyData.privateKeyPem, reqFields, MAC_WIRE_PURCHASE_DATE_OPTIONS);
   reqFields.MPI_MAC = mac.signature;
 
   txn.inquiry.request = {

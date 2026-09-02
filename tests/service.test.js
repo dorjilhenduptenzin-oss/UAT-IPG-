@@ -104,6 +104,7 @@ test("stored wire purchase date is generated once and reused for MPIReq and host
   expect(latest.diagnostics.formMacProof.mpiMacCanonicalPurchaseDate).toBe(
     latest.mpiReq.macPurchaseDate
   );
+  expect(latest.mpiReq.macPurchaseDate).toBe(createdWireDate);
 });
 
 test("form purchase date remains unchanged after MAC generation", async () => {
