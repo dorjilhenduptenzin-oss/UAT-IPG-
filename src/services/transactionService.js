@@ -761,6 +761,8 @@ function getConfigView() {
       inquiry: config.CARDZONE_INQUIRY_URL
     },
     enableMkReqMac: config.ENABLE_MKREQ_MAC,
+    mpiMacIncludeResponseType: config.MPI_MAC_INCLUDE_RESPONSE_TYPE,
+    mpiMacPurchaseDateTimezone: config.MPI_MAC_PURCHASE_DATE_TIMEZONE,
     useProxy: config.USE_CARDZONE_PROXY,
     proxy: {
       host: config.CARDZONE_PROXY_HOST,

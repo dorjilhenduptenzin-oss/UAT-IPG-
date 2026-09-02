@@ -9,6 +9,9 @@ const MODE = process.env.MODE === "MOCK" ? "MOCK" : "UAT";
 const IS_SERVERLESS_RUNTIME = Boolean(
   process.env.VERCEL || process.env.AWS_LAMBDA_FUNCTION_NAME || process.env.LAMBDA_TASK_ROOT
 );
+const SERVERLESS_DEFAULT_ORIGIN = process.env.VERCEL_URL
+  ? `https://${String(process.env.VERCEL_URL).replace(/^https?:\/\//, "")}`
+  : "";
 
 const BOOL_TRUE = new Set(["1", "true", "TRUE", "yes", "YES"]);
 
@@ -36,14 +39,19 @@ const config = Object.freeze({
   PORT: toInt(process.env.PORT, 3000),
   BIND_HOST: process.env.BIND_HOST || "0.0.0.0",
   MERCHANT_ID: process.env.MERCHANT_ID || "863990030700270",
-  CALLBACK_BASE_URL: process.env.CALLBACK_BASE_URL || "http://localhost:3000",
-  RETURN_BASE_URL: process.env.RETURN_BASE_URL || process.env.CALLBACK_BASE_URL || "http://localhost:3000",
+  CALLBACK_BASE_URL:
+    process.env.CALLBACK_BASE_URL ||
+    (IS_SERVERLESS_RUNTIME && SERVERLESS_DEFAULT_ORIGIN ? SERVERLESS_DEFAULT_ORIGIN : "http://localhost:3000"),
+  RETURN_BASE_URL:
+    process.env.RETURN_BASE_URL ||
+    process.env.CALLBACK_BASE_URL ||
+    (IS_SERVERLESS_RUNTIME && SERVERLESS_DEFAULT_ORIGIN ? SERVERLESS_DEFAULT_ORIGIN : "http://localhost:3000"),
   CARDZONE_MKREQ_URL: process.env.CARDZONE_MKREQ_URL || UAT_3DSS_CONFIG.mkReqUrl,
   CARDZONE_MERC_REQ_URL: process.env.CARDZONE_MERC_REQ_URL || UAT_3DSS_CONFIG.mercReqUrl,
   CARDZONE_INQUIRY_URL: process.env.CARDZONE_INQUIRY_URL || UAT_3DSS_CONFIG.mercReqUrl,
   ENABLE_MKREQ_MAC: toBool(process.env.ENABLE_MKREQ_MAC, false),
-  MPI_MAC_INCLUDE_RESPONSE_TYPE: toBool(process.env.MPI_MAC_INCLUDE_RESPONSE_TYPE, true),
-  MPI_MAC_PURCHASE_DATE_TIMEZONE: process.env.MPI_MAC_PURCHASE_DATE_TIMEZONE || "",
+  MPI_MAC_INCLUDE_RESPONSE_TYPE: toBool(process.env.MPI_MAC_INCLUDE_RESPONSE_TYPE, false),
+  MPI_MAC_PURCHASE_DATE_TIMEZONE: process.env.MPI_MAC_PURCHASE_DATE_TIMEZONE || "ASIA_THIMPHU",
   MERCHANT_PRIVATE_KEY_PEM_PATH:
     process.env.MERCHANT_PRIVATE_KEY_PEM_PATH ||
     path.join(process.cwd(), "data", "keys", "merchant_private.pem"),
