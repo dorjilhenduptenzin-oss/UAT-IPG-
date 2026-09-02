@@ -6,6 +6,9 @@ dotenv.config();
 
 const ENVIRONMENT = "UAT";
 const MODE = process.env.MODE === "MOCK" ? "MOCK" : "UAT";
+const IS_SERVERLESS_RUNTIME = Boolean(
+  process.env.VERCEL || process.env.AWS_LAMBDA_FUNCTION_NAME || process.env.LAMBDA_TASK_ROOT
+);
 
 const BOOL_TRUE = new Set(["1", "true", "TRUE", "yes", "YES"]);
 
@@ -44,7 +47,7 @@ const config = Object.freeze({
   MERCHANT_PRIVATE_KEY_PEM_PATH:
     process.env.MERCHANT_PRIVATE_KEY_PEM_PATH ||
     path.join(process.cwd(), "data", "keys", "merchant_private.pem"),
-  USE_CARDZONE_PROXY: toBool(process.env.USE_CARDZONE_PROXY, true),
+  USE_CARDZONE_PROXY: toBool(process.env.USE_CARDZONE_PROXY, !IS_SERVERLESS_RUNTIME),
   CARDZONE_PROXY_HOST: process.env.CARDZONE_PROXY_HOST || UAT_3DSS_CONFIG.proxyServer,
   CARDZONE_PROXY_PORT: toInt(process.env.CARDZONE_PROXY_PORT, UAT_3DSS_CONFIG.proxyPort),
   HTTP_PROXY: process.env.HTTP_PROXY || "",
@@ -66,6 +69,11 @@ if (!config.CARDZONE_INQUIRY_URL.includes("uat")) {
 }
 
 if (MODE === "UAT") {
+  if (IS_SERVERLESS_RUNTIME && config.USE_CARDZONE_PROXY) {
+    console.warn(
+      "[WARN] USE_CARDZONE_PROXY=true on serverless runtime. Ensure the proxy is publicly reachable from deployment environment."
+    );
+  }
   try {
     const callbackHost = new URL(config.CALLBACK_BASE_URL).hostname;
     if (["localhost", "127.0.0.1"].includes(callbackHost)) {

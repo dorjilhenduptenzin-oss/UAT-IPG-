@@ -76,6 +76,12 @@ Use `.env`:
 - `HTTP_PROXY`
 - `HTTPS_PROXY`
 
+Proxy note:
+
+- Local/corporate environments may require `USE_CARDZONE_PROXY=true`.
+- Serverless deployments (for example Vercel) should usually use `USE_CARDZONE_PROXY=false`.
+- If proxy is enabled in serverless, the proxy host must be publicly reachable from that runtime.
+
 URL intent:
 
 - `CALLBACK_BASE_URL`: merchant server callback base used for server-side integrations and diagnostics.
