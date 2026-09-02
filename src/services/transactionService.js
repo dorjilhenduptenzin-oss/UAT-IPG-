@@ -444,6 +444,17 @@ function orderedDiagnosticFields(fieldsSafe) {
   }));
 }
 
+function buildInquiryPurchaseId(originalTxnId) {
+  const digits = String(originalTxnId || "").replace(/\D/g, "");
+  if (!digits) {
+    throw new Error("Cannot build inquiry purchaseId: original transaction ID is missing.");
+  }
+  if (digits.length <= 19) {
+    return `${digits}1`;
+  }
+  return digits.slice(0, 20);
+}
+
 function buildMpiReq(txnId, cardInput) {
   const txn = loadTransaction(txnId);
   if (!txn) throw new Error("Transaction not found.");
@@ -614,6 +625,22 @@ function generateHostedFormHtml(txnId) {
     throw new Error("MPIReq runtime fields unavailable. Rebuild MPIReq for hosted submission.");
   }
 
+  const finalHtmlPurchaseDate = String(runtimeFields.MPI_PURCH_DATE || "");
+  const finalHtmlPurchaseId = String(runtimeFields.MPI_TRXN_ID || "");
+  const finalHtmlMerchantId = String(runtimeFields.MPI_MERC_ID || "");
+  const finalHtmlMac = String(runtimeFields.MPI_MAC || "");
+  const finalHtmlMacSha256 = sha256Hex(finalHtmlMac);
+  const storedWirePurchaseDate = String(txn.mpiPurchaseDate || "");
+  const finalHtmlEqualsStoredWire = finalHtmlPurchaseDate === storedWirePurchaseDate;
+
+  if (!finalHtmlEqualsStoredWire) {
+    txn.timeline.hostedFormGenerated = "FAIL";
+    txn.status = "FAILED";
+    txn.finalResult = "MPI_PURCH_DATE_MISMATCH_BEFORE_SUBMIT";
+    saveTransaction(txn);
+    throw new Error("Aborted: hosted form MPI_PURCH_DATE does not match stored transaction wire purchase date.");
+  }
+
   const inputs = Object.entries(runtimeFields)
     .map(([k, v]) => `<input type=\"hidden\" name=\"${escapeHtml(k)}\" value=\"${escapeHtml(v)}\" />`)
     .join("\n");
@@ -638,25 +665,26 @@ function generateHostedFormHtml(txnId) {
         : "MISMATCH"
   };
 
-  const formMacValue = String(runtimeFields.MPI_MAC || "");
+  const formMacValue = finalHtmlMac;
   const generatedMacValue = String(txn.mpiReq.mpiMac || "");
   const formMacEqualsGeneratedMac = formMacValue === generatedMacValue;
   const formMacSha256 = sha256Hex(formMacValue);
   const generatedMacSha256 = sha256Hex(generatedMacValue);
-  const storedWirePurchaseDate = String(txn.mpiPurchaseDate || "");
   const hostedFormPurchaseDate = String(runtimeFields.MPI_PURCH_DATE || "");
   const formPurchaseDateEqualsStoredWireDate =
     hostedFormPurchaseDate === storedWirePurchaseDate;
   const macCanonicalPurchaseDate = canonicalMpiPurchaseDateForCardzoneMac(storedWirePurchaseDate);
   const mpiMacCanonicalString = canonicalMpiMacInput(runtimeFields);
 
-  if (!formPurchaseDateEqualsStoredWireDate) {
-    txn.timeline.hostedFormGenerated = "FAIL";
-    txn.status = "FAILED";
-    txn.finalResult = "MPI_PURCH_DATE_MISMATCH_BEFORE_SUBMIT";
-    saveTransaction(txn);
-    throw new Error("Aborted: hosted form MPI_PURCH_DATE does not match stored transaction wire purchase date.");
-  }
+  logInfo("UAT_FINAL_HTML_FORM_VALUES", {
+    transactionId: txn.txnId,
+    FINAL_HTML_MPI_PURCH_DATE: finalHtmlPurchaseDate,
+    FINAL_HTML_MPI_PURCH_DATE_URLENCODED: encodeURIComponent(finalHtmlPurchaseDate),
+    FINAL_HTML_MPI_MAC_SHA256: finalHtmlMacSha256,
+    FINAL_HTML_PURCHASE_ID: finalHtmlPurchaseId,
+    FINAL_HTML_MERCHANT_ID: finalHtmlMerchantId,
+    FINAL_HTML_PURCHASE_DATE_EQUALS_STORED_WIRE_DATE: finalHtmlEqualsStoredWire
+  });
 
   logInfo("UAT_FORM_MAC_CHECK", {
     transactionId: txn.txnId,
@@ -797,6 +825,7 @@ async function runInquiry(txnId) {
     throw new Error("Cannot run inquiry: signing key is missing in runtime.");
   }
 
+  const inquiryPurchaseId = buildInquiryPurchaseId(txnId);
   const reqFields = {
     MPI_TRANS_TYPE: "INQ",
     MPI_MERC_ID: txn.merchantId,
@@ -804,7 +833,7 @@ async function runInquiry(txnId) {
     MPI_CARD_HOLDER_NAME: "",
     MPI_PAN_EXP: "",
     MPI_CVV2: "",
-    MPI_TRXN_ID: `${txnId}_INQ`,
+    MPI_TRXN_ID: inquiryPurchaseId,
     MPI_ORI_TRXN_ID: txnId,
     MPI_PURCH_DATE: formatUtcPurchaseDate(),
     MPI_PURCH_CURR: "",

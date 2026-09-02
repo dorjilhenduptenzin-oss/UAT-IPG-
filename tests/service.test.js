@@ -172,6 +172,8 @@ test("inquiry request generation sets INQ and original txn id", async () => {
   const inq = await runInquiry(txn.txnId);
   expect(inq.inquiry.request.MPI_TRANS_TYPE).toBe("INQ");
   expect(inq.inquiry.request.MPI_ORI_TRXN_ID).toBe(txn.txnId);
+  expect(/^\d{1,20}$/.test(inq.inquiry.request.MPI_TRXN_ID)).toBe(true);
+  expect(inq.inquiry.request.MPI_TRXN_ID.endsWith("_INQ")).toBe(false);
 });
 
 test("duplicate transaction protection triggers when id already exists", () => {

@@ -16,6 +16,7 @@ const {
 const { saveTransaction } = require("../storage/transactions");
 const { createPaymentLink } = require("../storage/paymentLinks");
 const { config } = require("../config/env");
+const { logInfo } = require("../utils/logger");
 
 const router = express.Router();
 
@@ -416,6 +417,18 @@ router.post("/transactions/:txnId/hosted-form-submitted", (req, res) => {
   if (!txn) {
     return res.status(404).json({ error: "Transaction not found" });
   }
+
+  const browserPurchaseDate = String(req.body?.finalHtmlMpiPurchDate || "");
+  const browserPurchaseId = String(req.body?.finalHtmlPurchaseId || "");
+  const browserMerchantId = String(req.body?.finalHtmlMerchantId || "");
+
+  logInfo("UAT_BROWSER_PRE_SUBMIT_FORM_VALUES", {
+    transactionId: req.params.txnId,
+    BROWSER_FINAL_HTML_MPI_PURCH_DATE: browserPurchaseDate,
+    BROWSER_FINAL_HTML_MPI_PURCH_DATE_URLENCODED: encodeURIComponent(browserPurchaseDate),
+    BROWSER_FINAL_HTML_PURCHASE_ID: browserPurchaseId,
+    BROWSER_FINAL_HTML_MERCHANT_ID: browserMerchantId
+  });
 
   txn.timeline.hostedFormSubmitted = "PASS";
   txn.timeline.hostedSubmitted = "PASS";
