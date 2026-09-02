@@ -66,6 +66,7 @@ Use `.env`:
 - `CARDZONE_MERC_REQ_URL`
 - `CARDZONE_INQUIRY_URL`
 - `MERCHANT_PRIVATE_KEY_PEM_PATH`
+- `DATA_DIR` (optional writable data root override)
 - `ENABLE_MKREQ_MAC=false`
 - `CALLBACK_BASE_URL`
 - `RETURN_BASE_URL`
@@ -198,7 +199,9 @@ Message shown:
 
 ## Transaction Storage
 
-- Directory: `./data/transactions`
+- Local default directory: `./data/transactions`
+- Serverless runtime (for example Vercel): `${os.tmpdir()}/uat-ipg-testing/data/transactions`
+- Override data root with `DATA_DIR` when needed.
 - File pattern: `txn_<transactionId>.json`
 
 ## API Summary

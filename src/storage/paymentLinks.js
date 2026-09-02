@@ -1,8 +1,9 @@
 const fs = require("fs");
 const path = require("path");
 const crypto = require("crypto");
+const { getDataRootDir } = require("./paths");
 
-const FILE = path.join(process.cwd(), "data", "payment_links.json");
+const FILE = path.join(getDataRootDir(), "payment_links.json");
 
 function ensureFile() {
   const dir = path.dirname(FILE);

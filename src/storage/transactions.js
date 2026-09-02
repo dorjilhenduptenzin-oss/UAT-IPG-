@@ -1,7 +1,8 @@
 const fs = require("fs");
 const path = require("path");
+const { getDataRootDir } = require("./paths");
 
-const TRANSACTION_DIR = path.join(process.cwd(), "data", "transactions");
+const TRANSACTION_DIR = path.join(getDataRootDir(), "transactions");
 
 function ensureDir() {
   fs.mkdirSync(TRANSACTION_DIR, { recursive: true });
