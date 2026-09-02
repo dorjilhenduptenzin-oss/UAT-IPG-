@@ -136,15 +136,16 @@ router.post("/initiate", async (req, res) => {
 
   try {
     const submittedMerchantId = String(value.merchantId || "").trim();
+    const effectiveMerchantId = submittedMerchantId || config.MERCHANT_ID;
     if (submittedMerchantId && submittedMerchantId !== config.MERCHANT_ID) {
       logInfo("UAT_INITIATE_MERCHANT_OVERRIDE", {
         submittedMerchantId,
-        effectiveMerchantId: config.MERCHANT_ID
+        effectiveMerchantId
       });
     }
 
     const txn = createTransaction({
-      merchantId: config.MERCHANT_ID,
+      merchantId: effectiveMerchantId,
       amountMajor: value.amountMajor,
       currency: value.currency,
       customerName: value.customerName,

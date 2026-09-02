@@ -191,8 +191,14 @@ function createTransaction(input) {
   const amountMajor = Number(input.amountMajor || 1.0).toFixed(2);
   const amountMinor = toMinorUnits(amountMajor, currency);
   const requestedMerchantId = String(input.merchantId || "").trim();
-  if (requestedMerchantId && requestedMerchantId !== config.MERCHANT_ID) {
-    throw new Error(`merchantId must match configured UAT merchant: ${config.MERCHANT_ID}`);
+  const allowedMerchants = new Set([
+    config.MERCHANT_ID,
+    "863990035600270",
+    "863990026500270"
+  ].filter(Boolean));
+  const effectiveMerchantId = requestedMerchantId || config.MERCHANT_ID;
+  if (requestedMerchantId && !allowedMerchants.has(requestedMerchantId)) {
+    throw new Error(`merchantId must match configured UAT merchant: ${config.MERCHANT_ID} or 863990026500270`);
   }
   const returnBaseUrl = String(input.returnBaseUrl || config.RETURN_BASE_URL).replace(/\/+$/, "");
   const responseUrl = input.responseUrl || `${returnBaseUrl}/api/return?txnId=${txnId}`;
@@ -200,7 +206,7 @@ function createTransaction(input) {
   const txn = {
     txnId,
     orderRef: input.orderRef || txnId,
-    merchantId: config.MERCHANT_ID,
+    merchantId: effectiveMerchantId,
     mpiPurchaseDate: formatUtcPurchaseDate(now),
     amountMinor,
     amountMajor,

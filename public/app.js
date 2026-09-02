@@ -29,9 +29,13 @@ function value(id) {
 
 async function loadConfig() {
   const cfg = await api("/api/config");
-  document.getElementById("merchantPill").textContent = `Merchant ID: ${cfg.merchantId}`;
+  const merchantSelect = document.getElementById("merchantId");
+  if (merchantSelect && cfg.merchantId) {
+    merchantSelect.value = cfg.merchantId;
+  }
+  const currentMid = merchantSelect ? merchantSelect.value : cfg.merchantId;
+  document.getElementById("merchantPill").textContent = `Merchant ID: ${currentMid}`;
   document.getElementById("modePill").textContent = `Mode: ${cfg.mode}`;
-  document.getElementById("merchantId").value = cfg.merchantId;
   setFlow(
     `Ready\nEnvironment: ${cfg.environment}\nMode: ${cfg.mode}\nmkReq: ${cfg.endpoints.mkReq}\nmercReq: ${cfg.endpoints.mercReq}`
   );
@@ -52,20 +56,47 @@ function validateMinimalFields() {
 }
 
 function bindButtons() {
+  const merchantSelect = document.getElementById("merchantId");
+  const currencySelect = document.getElementById("currency");
+
+  merchantSelect.addEventListener("change", (e) => {
+    const selectedMid = e.target.value;
+    if (selectedMid === "863990026500270") {
+      currencySelect.value = "356";
+    } else if (selectedMid === "863990035600270") {
+      currencySelect.value = "840";
+    }
+    document.getElementById("merchantPill").textContent = `Merchant ID: ${selectedMid}`;
+  });
+
+  currencySelect.addEventListener("change", (e) => {
+    const selectedCurr = e.target.value;
+    if (selectedCurr === "356") {
+      merchantSelect.value = "863990026500270";
+    } else if (selectedCurr === "840") {
+      merchantSelect.value = "863990035600270";
+    }
+    document.getElementById("merchantPill").textContent = `Merchant ID: ${merchantSelect.value}`;
+  });
+
   document.getElementById("loadUsd").onclick = () => {
-    document.getElementById("currency").value = "840";
+    merchantSelect.value = "863990035600270";
+    currencySelect.value = "840";
     document.getElementById("amountMajor").value = "1.00";
     document.getElementById("customerName").value = "UAT USD User";
     document.getElementById("customerEmail").value = "usd-uat@example.com";
+    document.getElementById("merchantPill").textContent = "Merchant ID: 863990035600270";
   };
   document.getElementById("loadInr").onclick = () => {
-    document.getElementById("currency").value = "356";
+    merchantSelect.value = "863990026500270";
+    currencySelect.value = "356";
     document.getElementById("amountMajor").value = "10.00";
     document.getElementById("customerName").value = "UAT INR User";
     document.getElementById("customerEmail").value = "inr-uat@example.com";
+    document.getElementById("merchantPill").textContent = "Merchant ID: 863990026500270";
   };
   document.getElementById("loadBtn").onclick = () => {
-    document.getElementById("currency").value = "064";
+    currencySelect.value = "064";
     document.getElementById("amountMajor").value = "100.00";
     document.getElementById("customerName").value = "UAT Bhutan User";
     document.getElementById("customerEmail").value = "btn-uat@example.com";
