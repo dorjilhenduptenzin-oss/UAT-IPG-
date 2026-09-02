@@ -285,6 +285,59 @@ test("canonical string remains exact for transaction 2026090207273400149", () =>
   expect(canonical).toBe("SALES863990035600270202609020727340014920260902072735840100");
 });
 
+test("canonical MAC purchase date handles midnight rollover", () => {
+  expect(
+    canonicalMpiPurchaseDateForCardzoneMac("20260901235959", {
+      purchaseDateTimezone: MPI_MAC_PURCHASE_DATE_TZ_ASIA_THIMPHU
+    })
+  ).toBe("20260902055959");
+});
+
+test("canonical MAC purchase date handles month rollover", () => {
+  expect(
+    canonicalMpiPurchaseDateForCardzoneMac("20260131190000", {
+      purchaseDateTimezone: MPI_MAC_PURCHASE_DATE_TZ_ASIA_THIMPHU
+    })
+  ).toBe("20260201010000");
+});
+
+test("canonical MAC purchase date handles year rollover", () => {
+  expect(
+    canonicalMpiPurchaseDateForCardzoneMac("20261231190000", {
+      purchaseDateTimezone: MPI_MAC_PURCHASE_DATE_TZ_ASIA_THIMPHU
+    })
+  ).toBe("20270101010000");
+});
+
+test("known Cardzone evidence vector uses one wire date source", () => {
+  const fields = minimalFields({
+    MPI_TRANS_TYPE: "SALES",
+    MPI_MERC_ID: "863990035600270",
+    MPI_PAN: "",
+    MPI_CARD_HOLDER_NAME: "",
+    MPI_PAN_EXP: "",
+    MPI_CVV2: "",
+    MPI_TRXN_ID: "2026090208572025579",
+    MPI_ORI_TRXN_ID: "",
+    MPI_PURCH_DATE: "20260902025721",
+    MPI_PURCH_CURR: "840",
+    MPI_PURCH_AMT: "100",
+    MPI_RESPONSE_TYPE: "STRING"
+  });
+
+  const macDate = canonicalMpiPurchaseDateForCardzoneMac(fields.MPI_PURCH_DATE, {
+    purchaseDateTimezone: MPI_MAC_PURCHASE_DATE_TZ_ASIA_THIMPHU
+  });
+  expect(macDate).toBe("20260902085721");
+
+  const canonical = canonicalMpiMacInput(fields, {
+    includeResponseType: false,
+    purchaseDateTimezone: MPI_MAC_PURCHASE_DATE_TZ_ASIA_THIMPHU
+  });
+
+  expect(canonical).toBe("SALES863990035600270202609020857202557920260902085721840100");
+});
+
 test("regression vector capability builds canonical string without expected signature", () => {
   const fields = minimalFields({
     MPI_TRANS_TYPE: "SALES",

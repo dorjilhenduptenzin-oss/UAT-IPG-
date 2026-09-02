@@ -17,6 +17,13 @@ const { saveTransaction } = require("../src/storage/transactions");
 const { canonicalCallbackMacInput } = require("../src/cardzone/mpi");
 const { generateRsa2048KeyPair, signSha256WithRsa } = require("../src/crypto/rsa");
 
+function extractHiddenField(html, fieldName) {
+  const escapedName = fieldName.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  const regex = new RegExp(`name=\"${escapedName}\" value=\"([^\"]*)\"`);
+  const match = html.match(regex);
+  return match ? match[1] : "";
+}
+
 function cleanupTxnFiles() {
   const dir = path.join(process.cwd(), "data", "transactions");
   if (!fs.existsSync(dir)) return;
@@ -69,6 +76,56 @@ test("hosted HTML form contains fields and preserves MPI_MAC", async () => {
   const latest = getTxDetail(txn.txnId);
   expect(latest.outboundMercReq.formSubmissionCheck).toBe("MATCH");
   expect(latest.mpiReq.mpiMac).toBe(originalMac);
+});
+
+test("stored wire purchase date is generated once and reused for MPIReq and hosted form", async () => {
+  const txn = createTransaction({ merchantId: "863990035600270", amountMajor: 1, currency: "840" });
+  const createdWireDate = txn.mpiPurchaseDate;
+  expect(/^\d{14}$/.test(createdWireDate)).toBe(true);
+
+  await runMkReq(txn.txnId);
+  const built = buildMpiReq(txn.txnId, {
+    cardNumber: "4111111111111111",
+    expiry: "1228",
+    cvv: "123"
+  });
+
+  expect(built.mpiPurchaseDate).toBe(createdWireDate);
+  expect(built.mpiReq.wirePurchaseDate).toBe(createdWireDate);
+  expect(built.mpiReq.fieldsSafe.MPI_PURCH_DATE).toBe(createdWireDate);
+
+  const html = generateHostedFormHtml(txn.txnId);
+  expect(extractHiddenField(html, "MPI_PURCH_DATE")).toBe(createdWireDate);
+
+  const latest = getTxDetail(txn.txnId);
+  expect(latest.mpiPurchaseDate).toBe(createdWireDate);
+  expect(latest.diagnostics.formMacProof.formPurchaseDateEqualsStoredWireDate).toBe(true);
+  expect(latest.diagnostics.formMacProof.hostedFormPurchaseDate).toBe(createdWireDate);
+  expect(latest.diagnostics.formMacProof.mpiMacCanonicalPurchaseDate).toBe(
+    latest.mpiReq.macPurchaseDate
+  );
+});
+
+test("form purchase date remains unchanged after MAC generation", async () => {
+  const txn = createTransaction({ merchantId: "863990035600270", amountMajor: 1, currency: "840" });
+  await runMkReq(txn.txnId);
+  const built = buildMpiReq(txn.txnId, {
+    cardNumber: "4111111111111111",
+    expiry: "1228",
+    cvv: "123"
+  });
+
+  const initialWireDate = built.mpiReq.wirePurchaseDate;
+  const firstHtml = generateHostedFormHtml(txn.txnId);
+  const secondHtml = generateHostedFormHtml(txn.txnId);
+
+  expect(extractHiddenField(firstHtml, "MPI_PURCH_DATE")).toBe(initialWireDate);
+  expect(extractHiddenField(secondHtml, "MPI_PURCH_DATE")).toBe(initialWireDate);
+
+  const latest = getTxDetail(txn.txnId);
+  expect(latest.mpiReq.wirePurchaseDate).toBe(initialWireDate);
+  expect(latest.mpiReq.macPurchaseDate).toBeDefined();
+  expect(latest.diagnostics.formMacProof.formPurchaseDateEqualsStoredWireDate).toBe(true);
 });
 
 test("callback parsing and final status mapping for 5A0", async () => {

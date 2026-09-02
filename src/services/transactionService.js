@@ -184,6 +184,7 @@ function classifyInquiryOutcome(response) {
 }
 
 function createTransaction(input) {
+  const now = new Date();
   const txnId = generateTransactionId();
   const currency = normalizeCurrencyCode(input.currency || "840");
   const amountMajor = Number(input.amountMajor || 1.0).toFixed(2);
@@ -199,6 +200,7 @@ function createTransaction(input) {
     txnId,
     orderRef: input.orderRef || txnId,
     merchantId: config.MERCHANT_ID,
+    mpiPurchaseDate: formatUtcPurchaseDate(now),
     amountMinor,
     amountMajor,
     currency,
@@ -206,7 +208,7 @@ function createTransaction(input) {
     responseUrl,
     environment: config.ENVIRONMENT,
     mode: config.MODE,
-    createdAt: new Date().toISOString(),
+    createdAt: now.toISOString(),
     customer: {
       name: input.customerName || "",
       email: input.customerEmail || "",
@@ -234,7 +236,7 @@ function createTransaction(input) {
     diagnostics: {},
     timeline: stageTemplate(),
     timestamps: {
-      createdAt: new Date().toISOString()
+      createdAt: now.toISOString()
     }
   };
 
@@ -487,7 +489,10 @@ function buildMpiReq(txnId, cardInput) {
   }
 
   const responseType = (cardInput.responseType || "STRING").toUpperCase();
-  const wirePurchaseDate = formatUtcPurchaseDate();
+  if (!/^\d{14}$/.test(String(txn.mpiPurchaseDate || ""))) {
+    txn.mpiPurchaseDate = formatUtcPurchaseDate();
+  }
+  const wirePurchaseDate = String(txn.mpiPurchaseDate);
   const mpiFields = {
     MPI_TRANS_TYPE: "SALES",
     MPI_MERC_ID: txn.merchantId,
@@ -638,16 +643,44 @@ function generateHostedFormHtml(txnId) {
   const formMacEqualsGeneratedMac = formMacValue === generatedMacValue;
   const formMacSha256 = sha256Hex(formMacValue);
   const generatedMacSha256 = sha256Hex(generatedMacValue);
+  const storedWirePurchaseDate = String(txn.mpiPurchaseDate || "");
+  const hostedFormPurchaseDate = String(runtimeFields.MPI_PURCH_DATE || "");
+  const formPurchaseDateEqualsStoredWireDate =
+    hostedFormPurchaseDate === storedWirePurchaseDate;
+  const macCanonicalPurchaseDate = canonicalMpiPurchaseDateForCardzoneMac(storedWirePurchaseDate);
+  const mpiMacCanonicalString = canonicalMpiMacInput(runtimeFields);
+
+  if (!formPurchaseDateEqualsStoredWireDate) {
+    txn.timeline.hostedFormGenerated = "FAIL";
+    txn.status = "FAILED";
+    txn.finalResult = "MPI_PURCH_DATE_MISMATCH_BEFORE_SUBMIT";
+    saveTransaction(txn);
+    throw new Error("Aborted: hosted form MPI_PURCH_DATE does not match stored transaction wire purchase date.");
+  }
 
   logInfo("UAT_FORM_MAC_CHECK", {
     transactionId: txn.txnId,
+    STORED_WIRE_MPI_PURCH_DATE: storedWirePurchaseDate,
+    HOSTED_FORM_PURCHASE_DATE: hostedFormPurchaseDate,
+    HOSTED_FORM_PURCHASE_DATE_SHA256: sha256Hex(hostedFormPurchaseDate),
+    MPI_MAC_CANONICAL_PURCHASE_DATE: macCanonicalPurchaseDate,
+    MPI_MAC_CANONICAL_STRING: mpiMacCanonicalString,
+    MPI_MAC_CANONICAL_STRING_SHA256: sha256Hex(mpiMacCanonicalString),
     FORM_MPI_MAC_EQUALS_GENERATED_MAC: formMacEqualsGeneratedMac,
+    FORM_PURCHASE_DATE_EQUALS_STORED_WIRE_DATE: formPurchaseDateEqualsStoredWireDate,
     FORM_MPI_MAC_SHA256: formMacSha256,
     MPI_MAC_SHA256: generatedMacSha256
   });
 
   txn.diagnostics.formMacProof = {
+    storedWireMpiPurchDate: storedWirePurchaseDate,
+    hostedFormPurchaseDate,
+    hostedFormPurchaseDateSha256: sha256Hex(hostedFormPurchaseDate),
+    mpiMacCanonicalPurchaseDate: macCanonicalPurchaseDate,
+    mpiMacCanonicalString,
+    mpiMacCanonicalStringSha256: sha256Hex(mpiMacCanonicalString),
     formMpiMacEqualsGeneratedMac: formMacEqualsGeneratedMac,
+    formPurchaseDateEqualsStoredWireDate,
     formMpiMacSha256: formMacSha256,
     mpiMacSha256: generatedMacSha256
   };
