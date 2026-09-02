@@ -29,7 +29,17 @@ function getDevConnectSrcOrigins() {
 function buildCspHeaderValue() {
   const isProduction = process.env.NODE_ENV === "production";
   if (isProduction) {
-    return "default-src 'none'; base-uri 'none'; frame-ancestors 'none';";
+    return [
+      "default-src 'self'",
+      "base-uri 'self'",
+      "connect-src 'self'",
+      "script-src 'self'",
+      "style-src 'self'",
+      "img-src 'self' data:",
+      "font-src 'self'",
+      "form-action 'self' https://uatczsecure.bob.bt",
+      "frame-ancestors 'none'"
+    ].join("; ");
   }
 
   const connectSrc = getDevConnectSrcOrigins().join(" ");
