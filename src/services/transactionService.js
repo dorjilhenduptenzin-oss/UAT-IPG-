@@ -530,6 +530,21 @@ function buildMpiReq(txnId, cardInput) {
   const mac = generateMpiMac(keyData.privateKeyPem, mpiFields);
   mpiFields.MPI_MAC = mac.signature;
 
+  const localVerify = verifySha256WithRsa(
+    signingDerived.publicKeyBase64Url,
+    mac.input,
+    mac.signature
+  );
+
+  logInfo("UAT_LOCAL_MAC_VERIFY", {
+    transactionId: txn.txnId,
+    LOCAL_MAC_VERIFY: localVerify,
+    MPI_MAC_LENGTH: mac.signature.length,
+    MPI_MAC_SHA256: sha256Hex(mac.signature),
+    MPI_MAC_CANONICAL_STRING_SHA256: mac.inputHash,
+    DERIVED_PUBLIC_KEY_FINGERPRINT: signingPrivateDerivedPublicKeyFingerprint
+  });
+
   const macCanonicalPurchaseDate = canonicalMpiPurchaseDateForCardzoneMac(wirePurchaseDate);
   logInfo("UAT_MPI_MAC_DEBUG", {
     transactionId: txn.txnId,
@@ -544,11 +559,7 @@ function buildMpiReq(txnId, cardInput) {
     keyPairMatch: txn.security.keyMatch
   });
 
-  const verifyResult = verifySha256WithRsa(
-    keyData.publicKeyBase64Url,
-    mac.input,
-    mac.signature
-  );
+  const verifyResult = localVerify;
 
   runtimeMpiRegistry.set(txnId, { ...mpiFields });
 
@@ -570,6 +581,14 @@ function buildMpiReq(txnId, cardInput) {
     mpiMacLength: mac.signature.length,
     signedValueHash: sha256Hex(canonicalMpiMacInput(mpiFields)),
     submittedValueHash: sha256Hex(canonicalMpiMacInput(mpiFields))
+  };
+
+  txn.diagnostics.localMacProof = {
+    localMacVerify: localVerify,
+    mpiMacLength: mac.signature.length,
+    mpiMacSha256: sha256Hex(mac.signature),
+    mpiMacCanonicalStringSha256: mac.inputHash,
+    derivedPublicKeyFingerprint: signingPrivateDerivedPublicKeyFingerprint
   };
 
   txn.timeline.mpiBuilt = "PASS";
@@ -612,6 +631,25 @@ function generateHostedFormHtml(txnId) {
       txn.mpiReq.signedValueHash === sha256Hex(canonicalMpiMacInput(runtimeFields))
         ? "MATCH"
         : "MISMATCH"
+  };
+
+  const formMacValue = String(runtimeFields.MPI_MAC || "");
+  const generatedMacValue = String(txn.mpiReq.mpiMac || "");
+  const formMacEqualsGeneratedMac = formMacValue === generatedMacValue;
+  const formMacSha256 = sha256Hex(formMacValue);
+  const generatedMacSha256 = sha256Hex(generatedMacValue);
+
+  logInfo("UAT_FORM_MAC_CHECK", {
+    transactionId: txn.txnId,
+    FORM_MPI_MAC_EQUALS_GENERATED_MAC: formMacEqualsGeneratedMac,
+    FORM_MPI_MAC_SHA256: formMacSha256,
+    MPI_MAC_SHA256: generatedMacSha256
+  });
+
+  txn.diagnostics.formMacProof = {
+    formMpiMacEqualsGeneratedMac: formMacEqualsGeneratedMac,
+    formMpiMacSha256: formMacSha256,
+    mpiMacSha256: generatedMacSha256
   };
 
   txn.timeline.hostedFormGenerated = "PASS";
