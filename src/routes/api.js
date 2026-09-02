@@ -236,6 +236,12 @@ function statusReason(txn) {
     return `Cardzone callback error ${code}: ${desc}`;
   }
 
+  if (String(txn.finalResult || "").startsWith("BROWSER_RETURN_ERROR_")) {
+    const code = txn.cardzoneReturn?.fields?.MPI_ERROR_CODE || "UNKNOWN";
+    const desc = txn.cardzoneReturn?.fields?.MPI_ERROR_DESC || "No description";
+    return `Cardzone browser return error ${code}: ${desc} (provisional until callback is received).`;
+  }
+
   if (txn.timeline?.callbackReceived !== "PASS") {
     return "Callback not received yet; awaiting callback or inquiry.";
   }
@@ -461,7 +467,10 @@ router.get("/return", async (req, res) => {
   txn.timestamps.returnViewedAt = new Date().toISOString();
   saveTransaction(txn);
 
-  const needsInquiry = !txn.callback?.macVerified;
+  const browserReturnCode = String(txn.cardzoneReturn?.fields?.MPI_ERROR_CODE || "");
+  const shouldSkipInquiryFromBrowserError =
+    !txn.callback?.macVerified && browserReturnCode && browserReturnCode !== "000";
+  const needsInquiry = !txn.callback?.macVerified && !shouldSkipInquiryFromBrowserError;
   if (needsInquiry) {
     try {
       await runInquiry(txnId);
@@ -518,6 +527,26 @@ router.post("/return", (req, res) => {
       txn.timeline.cardzonePageLoaded = "UNKNOWN";
       txn.timestamps.cardzoneResponseReceivedAt = new Date().toISOString();
     }
+
+    const browserErrorCode = String(fields.MPI_ERROR_CODE || "");
+    if (!txn.callback?.macVerified && browserErrorCode && browserErrorCode !== "000") {
+      txn.status = "FAILED";
+      txn.mpiResult = browserErrorCode;
+      txn.finalResult = `BROWSER_RETURN_ERROR_${browserErrorCode}`;
+      txn.timeline.final = "FAIL";
+      txn.timestamps.finalAt = new Date().toISOString();
+      txn.diagnostics.browserReturnFallback = {
+        provisional: true,
+        code: browserErrorCode,
+        description: String(fields.MPI_ERROR_DESC || "")
+      };
+      logInfo("UAT_BROWSER_RETURN_FALLBACK_STATUS", {
+        transactionId: txnId,
+        BROWSER_RETURN_MPI_ERROR_CODE: browserErrorCode,
+        BROWSER_RETURN_FINAL_RESULT: txn.finalResult
+      });
+    }
+
     saveTransaction(txn);
   }
 
