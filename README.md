@@ -54,6 +54,19 @@ or
 npm start
 ```
 
+## Deployment Architecture (Vercel)
+
+This project uses one Express app for both local and Vercel execution.
+
+- Local entry: `src/server.js` (calls `app.listen(...)`)
+- Vercel entry: `api/index.js` (exports the same `src/app.js` instance)
+- Vercel catch-all: `api/[...path].js` delegates to `api/index.js`
+- Vercel routing: `vercel.json` rewrites all paths to `/api/index`
+
+Flow:
+
+- Vercel -> `vercel.json` -> `api/index.js` -> `src/app.js` -> `src/routes/api.js` -> services
+
 ## Environment Variables
 
 Use `.env`:
@@ -67,7 +80,10 @@ Use `.env`:
 - `CARDZONE_INQUIRY_URL`
 - `MERCHANT_PRIVATE_KEY_PEM_PATH`
 - `DATA_DIR` (optional writable data root override)
+- `APP_VERSION` (optional deploy/version label)
 - `ENABLE_MKREQ_MAC=false`
+- `MPI_MAC_INCLUDE_RESPONSE_TYPE=false`
+- `MPI_MAC_PURCHASE_DATE_TIMEZONE=ASIA_THIMPHU`
 - `CALLBACK_BASE_URL`
 - `RETURN_BASE_URL`
 - `USE_CARDZONE_PROXY=true|false`
@@ -91,6 +107,18 @@ Localhost note:
 
 - A remote Cardzone server cannot call `http://localhost` on your machine.
 - Browser return to `localhost` works only when the customer's browser and this Node app run on the same machine.
+
+### Required UAT Values
+
+- `ENVIRONMENT=UAT`
+- `MERCHANT_ID=863990035600270`
+- `CARDZONE_MKREQ_URL=https://uatczsecure.bob.bt/3dss/mkReq`
+- `CARDZONE_MERC_REQ_URL=https://uatczsecure.bob.bt/3dss/mercReq`
+- `CARDZONE_INQUIRY_URL=https://uatczsecure.bob.bt/3dss/mercReq`
+- `MPI_MAC_INCLUDE_RESPONSE_TYPE=false`
+- `MPI_MAC_PURCHASE_DATE_TIMEZONE=ASIA_THIMPHU`
+- `RETURN_BASE_URL=https://uatipg.vercel.app`
+- `CALLBACK_BASE_URL=https://uatipg.vercel.app`
 
 ## UAT Endpoints
 
@@ -258,3 +286,19 @@ Use MOCK mode for safe app-level validation.
 
 - Local MAC verification pass does not prove Cardzone accepted the MAC.
 - Do not claim payment success unless callback MAC is verified and result/inquiry confirms final state.
+
+## Runtime Diagnostic
+
+Use `GET /api/config` to verify active deployment configuration without exposing secrets.
+This includes:
+
+- `appVersion`
+- `environment`
+- `merchantId`
+- `endpoints.mkReq`
+- `endpoints.mercReq`
+- `mpiMacIncludeResponseType`
+- `mpiMacPurchaseDateTimezone`
+- `callbackBaseUrl`
+- `returnBaseUrl`
+

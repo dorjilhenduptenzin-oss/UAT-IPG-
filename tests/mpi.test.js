@@ -71,7 +71,7 @@ test("MPI_RESPONSE_TYPE is excluded from canonical input when disabled", () => {
   const fields = {
     ...minimalFields({
       MPI_TRANS_TYPE: "SALES",
-      MPI_MERC_ID: "863990030700270",
+      MPI_MERC_ID: "863990035600270",
       MPI_PAN: "",
       MPI_CARD_HOLDER_NAME: "",
       MPI_PAN_EXP: "",
@@ -88,10 +88,10 @@ test("MPI_RESPONSE_TYPE is excluded from canonical input when disabled", () => {
     includeResponseType: false,
     purchaseDateTimezone: MPI_MAC_PURCHASE_DATE_TZ_ASIA_THIMPHU
   });
-  expect(input).toBe("SALES8639900307002702026090108305112820260901143051840100");
+  expect(input).toBe("SALES8639900356002702026090108305112820260901143051840100");
   expect(input.length).toBe(57);
   expect(require("../src/utils/hash").sha256Hex(input)).toBe(
-    "319a1c167111691a1ae43247db991dd74d1eae86df0a4211b181652db01acb21"
+    "849c0c3f242e3110717840f00ab267c365ccae683cc73e82169969c635b02ebc"
   );
 });
 
@@ -120,7 +120,7 @@ test("MAC verification succeeds when response type is excluded", () => {
     MPI_CVV2: "",
     MPI_TRXN_ID: "20260901083051128",
     MPI_PURCH_DATE: "20260901083051",
-    MPI_MERC_ID: "863990030700270",
+    MPI_MERC_ID: "863990035600270",
     MPI_PURCH_CURR: "840",
     MPI_PURCH_AMT: "100",
     MPI_RESPONSE_TYPE: "STRING"
@@ -138,7 +138,7 @@ test("MAC verification succeeds when response type is excluded", () => {
       purchaseDateTimezone: MPI_MAC_PURCHASE_DATE_TZ_ASIA_THIMPHU
     }
   );
-  expect(signed.input).toBe("SALES8639900307002702026090108305112820260901143051840100");
+  expect(signed.input).toBe("SALES8639900356002702026090108305112820260901143051840100");
   expect(verify.ok).toBe(true);
 });
 
@@ -165,7 +165,7 @@ test("purchase date is exactly 14 digits and not UTC formatted", () => {
 test("changing purchase date changes MPI_MAC", () => {
   const keys = generateRsa2048KeyPair();
   const first = minimalFields({
-    MPI_MERC_ID: "863990030700270",
+    MPI_MERC_ID: "863990035600270",
     MPI_TRXN_ID: "20260901091735694",
     MPI_PURCH_DATE: "20260901091736",
     MPI_PURCH_CURR: "840",
@@ -185,7 +185,7 @@ test("changing purchase date changes MPI_MAC", () => {
     includeResponseType: false,
     purchaseDateTimezone: MPI_MAC_PURCHASE_DATE_TZ_ASIA_THIMPHU
   });
-  expect(macA.input).toBe("SALES8639900307002702026090109173569420260901151736840100");
+  expect(macA.input).toBe("SALES8639900356002702026090109173569420260901151736840100");
   expect(macA.signature).not.toBe(macB.signature);
 });
 
@@ -219,7 +219,7 @@ test("purchase id remains unchanged while purchase date can vary", () => {
 
 test("canonical string matches Cardzone UAT vector while response type stays excluded", () => {
   const fields = minimalFields({
-    MPI_MERC_ID: "863990030700270",
+    MPI_MERC_ID: "863990035600270",
     MPI_TRXN_ID: "20260901092047332",
     MPI_PURCH_DATE: "20260901092047",
     MPI_PURCH_CURR: "840",
@@ -234,7 +234,31 @@ test("canonical string matches Cardzone UAT vector while response type stays exc
     includeResponseType: false,
     purchaseDateTimezone: MPI_MAC_PURCHASE_DATE_TZ_ASIA_THIMPHU
   });
-  expect(canonical).toBe("SALES8639900307002702026090109204733220260901152047840100");
+  expect(canonical).toBe("SALES8639900356002702026090109204733220260901152047840100");
+});
+
+test("known Cardzone UAT vector produces exact canonical string", () => {
+  const fields = minimalFields({
+    MPI_TRANS_TYPE: "SALES",
+    MPI_MERC_ID: "863990035600270",
+    MPI_PAN: "",
+    MPI_CARD_HOLDER_NAME: "",
+    MPI_PAN_EXP: "",
+    MPI_CVV2: "",
+    MPI_TRXN_ID: "2026090204484090456",
+    MPI_ORI_TRXN_ID: "",
+    MPI_PURCH_DATE: "20260901224841",
+    MPI_PURCH_CURR: "840",
+    MPI_PURCH_AMT: "100",
+    MPI_RESPONSE_TYPE: "STRING"
+  });
+
+  const canonical = canonicalMpiMacInput(fields, {
+    includeResponseType: false,
+    purchaseDateTimezone: MPI_MAC_PURCHASE_DATE_TZ_ASIA_THIMPHU
+  });
+
+  expect(canonical).toBe("SALES863990035600270202609020448409045620260902044841840100");
 });
 
 test("regression vector capability builds canonical string without expected signature", () => {
@@ -245,3 +269,4 @@ test("regression vector capability builds canonical string without expected sign
   const canonical = canonicalMpiMacInput(fields);
   expect(canonical.length).toBeGreaterThan(20);
 });
+

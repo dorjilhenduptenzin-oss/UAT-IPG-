@@ -38,7 +38,7 @@ test("amount conversion supports USD INR BTN", () => {
 });
 
 test("purchaseId equals MPI_TRXN_ID across mkReq and MPIReq", async () => {
-  const txn = createTransaction({ merchantId: "863990030700270", amountMajor: 1, currency: "840" });
+  const txn = createTransaction({ merchantId: "863990035600270", amountMajor: 1, currency: "840" });
   const afterMk = await runMkReq(txn.txnId);
   expect(afterMk.mkReq.request.purchaseId).toBe(txn.txnId);
 
@@ -52,7 +52,7 @@ test("purchaseId equals MPI_TRXN_ID across mkReq and MPIReq", async () => {
 });
 
 test("hosted HTML form contains fields and preserves MPI_MAC", async () => {
-  const txn = createTransaction({ merchantId: "863990030700270", amountMajor: 1, currency: "840" });
+  const txn = createTransaction({ merchantId: "863990035600270", amountMajor: 1, currency: "840" });
   await runMkReq(txn.txnId);
   const built = buildMpiReq(txn.txnId, {
     cardNumber: "4111111111111111",
@@ -71,13 +71,13 @@ test("hosted HTML form contains fields and preserves MPI_MAC", async () => {
 });
 
 test("callback parsing and final status mapping for 5A0", async () => {
-  const txn = createTransaction({ merchantId: "863990030700270", amountMajor: 1, currency: "840" });
+  const txn = createTransaction({ merchantId: "863990035600270", amountMajor: 1, currency: "840" });
   await runMkReq(txn.txnId);
   buildMpiReq(txn.txnId, { cardNumber: "4111111111111111", expiry: "1228", cvv: "123" });
   generateHostedFormHtml(txn.txnId);
 
   const out = processCallback({
-    MPI_MERC_ID: "863990030700270",
+    MPI_MERC_ID: "863990035600270",
     MPI_TRXN_ID: txn.txnId,
     MPI_MAC: "invalid",
     MPI_ERROR_CODE: "5A0",
@@ -108,7 +108,7 @@ test("callback MAC verification helper can pass with matching signature", () => 
 });
 
 test("inquiry request generation sets INQ and original txn id", async () => {
-  const txn = createTransaction({ merchantId: "863990030700270", amountMajor: 1, currency: "840" });
+  const txn = createTransaction({ merchantId: "863990035600270", amountMajor: 1, currency: "840" });
   await runMkReq(txn.txnId);
   buildMpiReq(txn.txnId, { cardNumber: "4111111111111111", expiry: "1228", cvv: "123" });
   const inq = await runInquiry(txn.txnId);
@@ -126,6 +126,13 @@ test("duplicate transaction protection triggers when id already exists", () => {
   }));
   const svc = require("../src/services/transactionService");
   expect(() =>
-    svc.createTransaction({ merchantId: "863990030700270", amountMajor: 1, currency: "840" })
+    svc.createTransaction({ merchantId: "863990035600270", amountMajor: 1, currency: "840" })
   ).toThrow("Duplicate transaction ID generated. Retry.");
 });
+
+test("configured UAT merchant is authoritative", () => {
+  expect(() =>
+    createTransaction({ merchantId: "863990030700270", amountMajor: 1, currency: "840" })
+  ).toThrow("merchantId must match configured UAT merchant: 863990035600270");
+});
+

@@ -11,7 +11,6 @@ const {
 const { doMkReq, doFormPost } = require("../cardzone/client");
 const {
   formatUtcPurchaseDate,
-  formatPurchaseDate,
   canonicalMpiPurchaseDateForCardzoneMac,
   buildMpiLineItem,
   generateMpiMac,
@@ -20,8 +19,10 @@ const {
 } = require("../cardzone/mpi");
 const { sha256Hex } = require("../utils/hash");
 const { maskPan } = require("../utils/mask");
+const { logInfo } = require("../utils/logger");
 const { config } = require("../config/env");
 const { UAT_3DSS_CONFIG } = require("../config/uat3dss");
+const { getDataRootDir } = require("../storage/paths");
 const {
   saveTransaction,
   loadTransaction,
@@ -40,6 +41,24 @@ const CURRENCY_CONFIG = Object.freeze({
 
 const PURCHASE_ID_REGEX = /^\d{19}$/;
 const PURCHASE_ID_FORMAT_DESC = "YYYYMMDDHHmmss + 5 numeric digits (19 chars total)";
+
+function getTxnPrivateKeyPath(txnId) {
+  return path.join(getDataRootDir(), "keys", `private_${txnId}.pem`);
+}
+
+function persistGeneratedPrivateKey(txnId, privateKeyPem) {
+  const keyPath = getTxnPrivateKeyPath(txnId);
+  const keyDir = path.dirname(keyPath);
+  fs.mkdirSync(keyDir, { recursive: true });
+  fs.writeFileSync(keyPath, privateKeyPem, { encoding: "utf8", mode: 0o600 });
+  return keyPath;
+}
+
+function loadTxnPrivateKey(txnId) {
+  const keyPath = getTxnPrivateKeyPath(txnId);
+  if (!fs.existsSync(keyPath)) return null;
+  return fs.readFileSync(keyPath, "utf8");
+}
 
 function normalizeCurrencyCode(code) {
   const raw = String(code ?? "840").trim();
@@ -169,13 +188,17 @@ function createTransaction(input) {
   const currency = normalizeCurrencyCode(input.currency || "840");
   const amountMajor = Number(input.amountMajor || 1.0).toFixed(2);
   const amountMinor = toMinorUnits(amountMajor, currency);
+  const requestedMerchantId = String(input.merchantId || "").trim();
+  if (requestedMerchantId && requestedMerchantId !== config.MERCHANT_ID) {
+    throw new Error(`merchantId must match configured UAT merchant: ${config.MERCHANT_ID}`);
+  }
   const returnBaseUrl = String(input.returnBaseUrl || config.RETURN_BASE_URL).replace(/\/+$/, "");
   const responseUrl = input.responseUrl || `${returnBaseUrl}/api/return?txnId=${txnId}`;
 
   const txn = {
     txnId,
     orderRef: input.orderRef || txnId,
-    merchantId: input.merchantId || config.MERCHANT_ID,
+    merchantId: config.MERCHANT_ID,
     amountMinor,
     amountMajor,
     currency,
@@ -236,6 +259,10 @@ function loadOrGenerateKeys(txn) {
     publicKeyBase64Url = generated.publicKeyBase64Url;
   }
 
+  if (!loadedPrivate) {
+    persistGeneratedPrivateKey(txn.txnId, privateKeyPem);
+  }
+
   keyRegistry.set(txn.txnId, {
     privateKeyPem,
     publicKeyBase64Url
@@ -250,6 +277,37 @@ function loadOrGenerateKeys(txn) {
 
   saveTransaction(txn);
   return { privateKeyPem, publicKeyBase64Url };
+}
+
+function getOrLoadKeyData(txn) {
+  const inMemory = keyRegistry.get(txn.txnId);
+  if (inMemory?.privateKeyPem && inMemory?.publicKeyBase64Url) {
+    return inMemory;
+  }
+
+  const configuredPrivate = readPrivateKeyFromPath(config.MERCHANT_PRIVATE_KEY_PEM_PATH);
+  if (configuredPrivate) {
+    const derived = derivePublicKeyFromPrivatePem(configuredPrivate);
+    const loaded = {
+      privateKeyPem: configuredPrivate,
+      publicKeyBase64Url: derived.publicKeyBase64Url
+    };
+    keyRegistry.set(txn.txnId, loaded);
+    return loaded;
+  }
+
+  const txnPrivate = loadTxnPrivateKey(txn.txnId);
+  if (txnPrivate) {
+    const derived = derivePublicKeyFromPrivatePem(txnPrivate);
+    const loaded = {
+      privateKeyPem: txnPrivate,
+      publicKeyBase64Url: derived.publicKeyBase64Url
+    };
+    keyRegistry.set(txn.txnId, loaded);
+    return loaded;
+  }
+
+  return null;
 }
 
 function extractCardzonePublicKey(mkReqResponse, fallbackPub) {
@@ -388,7 +446,7 @@ function buildMpiReq(txnId, cardInput) {
     throw new Error("mkReq must succeed before MPIReq.");
   }
 
-  const keyData = keyRegistry.get(txnId);
+  const keyData = getOrLoadKeyData(txn);
   if (!keyData) {
     throw new Error("Signing key not found for transaction.");
   }
@@ -437,6 +495,20 @@ function buildMpiReq(txnId, cardInput) {
   const mac = generateMpiMac(keyData.privateKeyPem, mpiFields);
   mpiFields.MPI_MAC = mac.signature;
 
+  const macCanonicalPurchaseDate = canonicalMpiPurchaseDateForCardzoneMac(wirePurchaseDate);
+  logInfo("UAT_MPI_MAC_DEBUG", {
+    transactionId: txn.txnId,
+    merchantId: txn.merchantId,
+    wirePurchaseDate,
+    macPurchaseDate: macCanonicalPurchaseDate,
+    mpiMacCanonicalString: mac.input,
+    mpiMacCanonicalStringLength: mac.input.length,
+    mpiMacCanonicalStringSha256: mac.inputHash,
+    publicKeyFingerprint: txn.security.mkReqPubFingerprint,
+    signingKeyFingerprint: txn.security.signingPubFingerprint,
+    keyPairMatch: txn.security.keyMatch
+  });
+
   const verifyResult = verifySha256WithRsa(
     keyData.publicKeyBase64Url,
     mac.input,
@@ -456,7 +528,7 @@ function buildMpiReq(txnId, cardInput) {
     fieldsSafe: safeFields,
     orderedFields: orderedDiagnosticFields(safeFields),
     wirePurchaseDate,
-    macPurchaseDate: canonicalMpiPurchaseDateForCardzoneMac(wirePurchaseDate),
+    macPurchaseDate: macCanonicalPurchaseDate,
     signInputLength: mac.input.length,
     signInputHash: mac.inputHash,
     mpiMac: mac.signature,
@@ -614,7 +686,7 @@ async function runInquiry(txnId) {
   const txn = loadTransaction(txnId);
   if (!txn) throw new Error("Transaction not found.");
 
-  const keyData = keyRegistry.get(txnId);
+  const keyData = getOrLoadKeyData(txn);
   if (!keyData) {
     throw new Error("Cannot run inquiry: signing key is missing in runtime.");
   }
@@ -747,6 +819,7 @@ function getDashboard(filter = "ALL") {
 
 function getConfigView() {
   return {
+    appVersion: config.APP_VERSION,
     environment: config.ENVIRONMENT,
     mode: config.MODE,
     bindHost: config.BIND_HOST,
@@ -810,10 +883,7 @@ function saveUatPrivateKeyIfGenerated(txnId) {
   const keyData = keyRegistry.get(txnId);
   if (!keyData) return null;
 
-  const dir = path.join(process.cwd(), "data", "keys");
-  fs.mkdirSync(dir, { recursive: true });
-  const file = path.join(dir, `private_${txnId}.pem`);
-  fs.writeFileSync(file, keyData.privateKeyPem, { encoding: "utf8", mode: 0o600 });
+  const file = persistGeneratedPrivateKey(txnId, keyData.privateKeyPem);
   return file;
 }
 

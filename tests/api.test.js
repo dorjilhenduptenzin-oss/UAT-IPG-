@@ -18,7 +18,7 @@ test("GET / returns dashboard", async () => {
 
 test("POST /api/callback parses payload and updates transaction state", async () => {
   const createRes = await request(app).post("/api/transactions").send({
-    merchantId: "863990030700270",
+    merchantId: "863990035600270",
     amountMajor: 1.0,
     currency: "840"
   });
@@ -32,7 +32,7 @@ test("POST /api/callback parses payload and updates transaction state", async ()
     .post("/api/callback")
     .set("Content-Type", "application/x-www-form-urlencoded")
     .send(
-      `MPI_MERC_ID=863990030700270&MPI_TRXN_ID=${encodeURIComponent(txnId)}&MPI_ERROR_CODE=&MPI_APPR_CODE=&MPI_RRN=&MPI_BIN=&MPI_REFERRAL_CODE=&MPI_MAC=`
+      `MPI_MERC_ID=863990035600270&MPI_TRXN_ID=${encodeURIComponent(txnId)}&MPI_ERROR_CODE=&MPI_APPR_CODE=&MPI_RRN=&MPI_BIN=&MPI_REFERRAL_CODE=&MPI_MAC=`
     );
 
   expect(callbackRes.status).toBe(200);
@@ -45,3 +45,4 @@ test("POST /api/callback parses payload and updates transaction state", async ()
   expect(txRes.body.timeline.callbackReceived).toBe("PASS");
   expect(txRes.body.callback.fields.MPI_TRXN_ID).toBe(txnId);
 });
+

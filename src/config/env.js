@@ -12,6 +12,7 @@ const IS_SERVERLESS_RUNTIME = Boolean(
 const SERVERLESS_DEFAULT_ORIGIN = process.env.VERCEL_URL
   ? `https://${String(process.env.VERCEL_URL).replace(/^https?:\/\//, "")}`
   : "";
+const UAT_MERCHANT_ID = "863990035600270";
 
 const BOOL_TRUE = new Set(["1", "true", "TRUE", "yes", "YES"]);
 
@@ -36,9 +37,14 @@ function toInt(value, defaultValue) {
 const config = Object.freeze({
   ENVIRONMENT,
   MODE,
+  APP_VERSION:
+    process.env.APP_VERSION ||
+    process.env.VERCEL_GIT_COMMIT_SHA ||
+    process.env.npm_package_version ||
+    "dev",
   PORT: toInt(process.env.PORT, 3000),
   BIND_HOST: process.env.BIND_HOST || "0.0.0.0",
-  MERCHANT_ID: process.env.MERCHANT_ID || "863990030700270",
+  MERCHANT_ID: process.env.MERCHANT_ID || UAT_MERCHANT_ID,
   CALLBACK_BASE_URL:
     process.env.CALLBACK_BASE_URL ||
     (IS_SERVERLESS_RUNTIME && SERVERLESS_DEFAULT_ORIGIN ? SERVERLESS_DEFAULT_ORIGIN : "http://localhost:3000"),
@@ -64,6 +70,10 @@ const config = Object.freeze({
 
 if (process.env.ENVIRONMENT && process.env.ENVIRONMENT !== "UAT") {
   throw new Error("Only ENVIRONMENT=UAT is allowed for this tool.");
+}
+
+if (config.MERCHANT_ID !== UAT_MERCHANT_ID) {
+  throw new Error(`MERCHANT_ID must be ${UAT_MERCHANT_ID} for this UAT integration.`);
 }
 
 if (!config.CARDZONE_MKREQ_URL.includes("uat")) {
