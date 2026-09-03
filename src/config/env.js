@@ -57,10 +57,11 @@ const config = Object.freeze({
   BIND_HOST: process.env.BIND_HOST || "0.0.0.0",
   MERCHANT_ID: process.env.MERCHANT_ID || UAT_MERCHANT_ID,
   UAT_ENROLLED_MERCHANT_IDS,
-  // Cardzone's public key for verifying the MPIRes / callback MAC. The primary
-  // source is the per-transaction key returned by mkReq; this is the fallback
-  // used when that record is not available (e.g. a callback that lands on a
-  // cold serverless instance with no durable store configured).
+  // Static last-resort key for verifying the MPIRes / callback MAC. Cardzone's
+  // UAT mkReq returns a DIFFERENT public key per transaction, so a static value
+  // here will normally NOT match a given callback - the authoritative source is
+  // the per-transaction key captured at mkReq time and kept in the durable
+  // store. Leave empty unless Cardzone confirms a stable per-merchant key.
   CARDZONE_PUBLIC_KEY: process.env.CARDZONE_PUBLIC_KEY || "",
   CALLBACK_BASE_URL: process.env.CALLBACK_BASE_URL || STABLE_UAT_BASE_URL,
   RETURN_BASE_URL: process.env.RETURN_BASE_URL || process.env.CALLBACK_BASE_URL || STABLE_UAT_BASE_URL,

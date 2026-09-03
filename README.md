@@ -76,7 +76,7 @@ Use `.env`:
 - `PORT`
 - `MERCHANT_ID`
 - `UAT_ENROLLED_MERCHANT_IDS` (comma separated; a merchant ID must be in Cardzone's acquirer system **and** MPI enrol screen or `mercReq` returns `503 Invalid Merchant`)
-- `CARDZONE_PUBLIC_KEY` (Base64URL SPKI; fallback for verifying callback/MPIRes MAC when the per-transaction mkReq key is unavailable)
+- `CARDZONE_PUBLIC_KEY` (Base64URL SPKI; static last-resort key for callback/MPIRes MAC. Cardzone UAT returns a per-transaction key from mkReq, so a static value usually will not match - normally leave empty and rely on the durable store)
 - `KV_REST_API_URL` / `KV_REST_API_TOKEN` (Vercel KV / Upstash Redis REST; durable cross-request state, see below)
 - `CARDZONE_MKREQ_URL`
 - `CARDZONE_MERC_REQ_URL`
@@ -122,7 +122,8 @@ Localhost note:
 - `MPI_MAC_PURCHASE_DATE_TIMEZONE=` (empty; MAC is signed over the wire `MPI_PURCH_DATE` unchanged)
 - `RETURN_BASE_URL=https://uatipg.vercel.app`
 - `CALLBACK_BASE_URL=https://uatipg.vercel.app`
-- `KV_REST_API_URL=` / `KV_REST_API_TOKEN=` (set to a Vercel KV store for a reliable serverless flow)
+- `KV_REST_API_URL` / `KV_REST_API_TOKEN` (provided by the connected Vercel KV / Upstash store; required for a reliable serverless flow)
+- `CARDZONE_PUBLIC_KEY=` (leave empty; Cardzone UAT issues a per-transaction key)
 
 ## UAT Endpoints
 
