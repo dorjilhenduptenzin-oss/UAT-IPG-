@@ -874,26 +874,22 @@ function generateHostedFormHtml(txnId) {
     browserReturnUrl: txn.browserReturnUrl || `${String(config.RETURN_BASE_URL).replace(/\/+$/, "")}/api/return?txnId=${txn.txnId}`
   });
 
-    // Per the Cardzone spec (revision 2.3) MPIReq must be form-posted into an
-    // HTML iframe (inline or lightbox) as EMVCo requires, not via a top-level
-    // redirect. The form targets the inline iframe below; Cardzone's card-entry
-    // and OTP screens render inside it and the cardholder sees them there.
+    // The Cardzone spec (rev 2.3) asks for an iframe, but the UAT mercReq
+    // response is served with `X-Frame-Options: DENY`, so the hosted card /
+    // 3DS pages cannot be embedded - they must load as a top-level navigation.
+    // The form auto-submits (see /autopost.js) straight to Cardzone; the
+    // browser returns to MPI_RESPONSE_LINK and the server callback is the
+    // authoritative result.
     return `<!doctype html>
   <html>
   <head>
     <meta charset=\"utf-8\" />
     <meta name=\"viewport\" content=\"width=device-width, initial-scale=1\" />
     <title>Cardzone UAT Hosted Payment</title>
-    <style>
-      body { font-family: Segoe UI, Arial, sans-serif; margin: 0; background: #f6f8fb; }
-      .bar { padding: 10px 16px; font-size: 14px; color: #334155; }
-      #cardzoneFrame { display: block; width: 100%; height: calc(100vh - 40px); border: 0; background: #fff; }
-    </style>
   </head>
   <body>
-    <div class=\"bar\">Complete your card details on the Cardzone secure page below. Do not refresh or close this window.</div>
-    <form id=\"mercReqForm\" method=\"POST\" action=\"${escapeHtml(config.CARDZONE_MERC_REQ_URL)}\" target=\"cardzoneFrame\">${inputs}</form>
-    <iframe id=\"cardzoneFrame\" name=\"cardzoneFrame\" title=\"Cardzone secure payment\"></iframe>
+    <p>Redirecting to the Cardzone secure payment page. Do not refresh or close this window.</p>
+    <form id=\"mercReqForm\" method=\"POST\" action=\"${escapeHtml(config.CARDZONE_MERC_REQ_URL)}\">${inputs}</form>
     <script src=\"/autopost.js\"></script>
     <noscript><button type=\"submit\" form=\"mercReqForm\">Continue to Cardzone</button></noscript>
   </body>

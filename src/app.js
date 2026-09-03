@@ -18,11 +18,9 @@ function buildCspHeaderValue() {
     "style-src 'self' 'unsafe-inline'",
     "img-src * 'self' data: blob:",
     "font-src 'self' data:",
+    // Hosted payment is a top-level POST to Cardzone (their mercReq response
+    // sets X-Frame-Options: DENY, so it cannot be iframed).
     "form-action 'self' https://uatczsecure.bob.bt",
-    // The hosted-payment page posts MPIReq into an iframe that loads the
-    // Cardzone UAT card-entry / OTP screens.
-    "frame-src 'self' https://uatczsecure.bob.bt",
-    "child-src 'self' https://uatczsecure.bob.bt",
     "frame-ancestors *"
   ].join("; ");
 }

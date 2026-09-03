@@ -194,8 +194,9 @@ Payload:
   `MPI_CVV2` are always sent empty and signed empty (card data is entered on
   the Cardzone page). Sending or signing a value in these positions causes a
   `5A0` MAC mismatch.
-- `mercReq` is form-posted into an HTML iframe (per Cardzone spec rev 2.3),
-  not a top-level redirect.
+- `mercReq` is a top-level auto-submitting form POST. The spec (rev 2.3) asks
+  for an iframe, but the Cardzone UAT `mercReq` response sets
+  `X-Frame-Options: DENY`, so the hosted card / 3DS pages cannot be embedded.
 
 ## Callback
 
