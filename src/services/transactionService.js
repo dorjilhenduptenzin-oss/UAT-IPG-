@@ -716,6 +716,11 @@ function buildMpiReq(txnId, cardInput) {
   const verifyResult = localVerify;
 
   runtimeMpiRegistry.set(txnId, { ...mpiFields });
+  // Also persist the exact wire fields on the transaction record so the hosted
+  // form can be rebuilt on a different serverless invocation. For the Hosted
+  // Payment Page these fields carry no card data (PAN/name/expiry/CVV are
+  // blank); MPI_MAC is transmitted to Cardzone in the browser form anyway.
+  txn.mpiReqRuntimeFields = { ...mpiFields };
 
   const safeFields = {
     ...mpiFields,
@@ -758,10 +763,13 @@ function buildMpiReq(txnId, cardInput) {
 function generateHostedFormHtml(txnId) {
   const txn = loadTransaction(txnId);
   if (!txn) throw new Error("Transaction not found.");
-  const runtimeFields = runtimeMpiRegistry.get(txnId);
+  // Prefer the in-memory copy; fall back to the copy persisted on the
+  // transaction record (survives a cold serverless invocation / KV rehydrate).
+  const runtimeFields = runtimeMpiRegistry.get(txnId) || txn.mpiReqRuntimeFields;
   if (!runtimeFields) {
     throw new Error("MPIReq runtime fields unavailable. Rebuild MPIReq for hosted submission.");
   }
+  runtimeMpiRegistry.set(txnId, { ...runtimeFields });
 
   const finalHtmlPurchaseDate = String(runtimeFields.MPI_PURCH_DATE || "");
   const finalHtmlPurchaseId = String(runtimeFields.MPI_TRXN_ID || "");
