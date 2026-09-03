@@ -1,8 +1,10 @@
 const fs = require("fs");
 const path = require("path");
 const { getDataRootDir } = require("./paths");
+const { durableEnabled, durableGet, durableSet } = require("./durable");
 
 const TRANSACTION_DIR = path.join(getDataRootDir(), "transactions");
+const DURABLE_TXN_PREFIX = "uat:txn:";
 const memoryCache = new Map();
 
 function ensureDir() {
@@ -108,10 +110,45 @@ function listRecentTransactions(limit = 50) {
   return list.slice(0, limit);
 }
 
+/**
+ * Pull a transaction from the durable store (if configured) into the local
+ * memory cache so the synchronous load/save API can serve it on a cold
+ * serverless invocation. No-op when no durable store is configured.
+ */
+async function hydrateFromDurable(txnId) {
+  if (!durableEnabled() || !txnId) {
+    return null;
+  }
+  const key = DURABLE_TXN_PREFIX + String(txnId).trim();
+  const record = await durableGet(key);
+  if (record && record.txnId) {
+    memoryCache.set(record.txnId, record);
+    return record;
+  }
+  return null;
+}
+
+/**
+ * Flush the current in-memory copy of a transaction to the durable store so
+ * the next (possibly different) serverless invocation can rehydrate it.
+ */
+async function persistToDurable(txnId) {
+  if (!durableEnabled() || !txnId) {
+    return false;
+  }
+  const record = memoryCache.get(String(txnId).trim());
+  if (!record) {
+    return false;
+  }
+  return durableSet(DURABLE_TXN_PREFIX + record.txnId, record);
+}
+
 module.exports = {
   saveTransaction,
   loadTransaction,
   transactionExists,
   listRecentTransactions,
+  hydrateFromDurable,
+  persistToDurable,
   TRANSACTION_DIR
 };

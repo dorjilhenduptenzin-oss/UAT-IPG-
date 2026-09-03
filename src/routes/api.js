@@ -11,7 +11,9 @@ const {
   getDashboard,
   getConfigView,
   exportSafeDiagnostic,
-  saveUatPrivateKeyIfGenerated
+  saveUatPrivateKeyIfGenerated,
+  hydrateDurableState,
+  persistDurableState
 } = require("../services/transactionService");
 const { saveTransaction } = require("../storage/transactions");
 const { createPaymentLink } = require("../storage/paymentLinks");
@@ -143,6 +145,7 @@ router.post("/initiate", async (req, res) => {
     });
 
     const hostedPage = generateHostedFormHtml(txn.txnId);
+    await persistDurableState(txn.txnId);
     return res.type("html").send(hostedPage);
   } catch (caught) {
     return res.status(400).send(renderErrorPage(caught.message || "Initiation failed"));
@@ -316,7 +319,8 @@ router.get("/transactions", (req, res) => {
   res.json({ items: getDashboard(filter) });
 });
 
-router.get("/tx/:txnId", (req, res) => {
+router.get("/tx/:txnId", async (req, res) => {
+  await hydrateDurableState(req.params.txnId);
   const txn = getTxDetail(req.params.txnId);
   if (!txn) {
     return res.status(404).json({ error: "Transaction not found" });
@@ -324,7 +328,7 @@ router.get("/tx/:txnId", (req, res) => {
   return res.json(txn);
 });
 
-router.post("/transactions", (req, res) => {
+router.post("/transactions", async (req, res) => {
   const { error, value } = InitiatePaymentSchema.validate(req.body || {}, { abortEarly: false });
   if (error) {
     return res.status(400).json({ error: error.message });
@@ -332,6 +336,7 @@ router.post("/transactions", (req, res) => {
   const txn = createTransaction({
     ...value
   });
+  await persistDurableState(txn.txnId);
   return res.status(201).json(txn);
 });
 
@@ -348,14 +353,16 @@ router.post("/transactions/:txnId/mkreq", async (req, res) => {
   }
 });
 
-router.post("/transactions/:txnId/mpireq", (req, res) => {
+router.post("/transactions/:txnId/mpireq", async (req, res) => {
   try {
     const { error, value } = CardzoneMPIReqSchema.validate(req.body || {}, { abortEarly: false });
     if (error) {
       return res.status(400).json({ error: error.message });
     }
 
+    await hydrateDurableState(req.params.txnId);
     const txn = buildMpiReq(req.params.txnId, value);
+    await persistDurableState(txn.txnId);
     return res.json({
       txnId: txn.txnId,
       purchaseIdEqualsMpiTrxnId: txn.txnId === txn.mpiReq.fieldsSafe.MPI_TRXN_ID,
@@ -369,16 +376,18 @@ router.post("/transactions/:txnId/mpireq", (req, res) => {
   }
 });
 
-router.get("/transactions/:txnId/hosted-form", (req, res) => {
+router.get("/transactions/:txnId/hosted-form", async (req, res) => {
   try {
+    await hydrateDurableState(req.params.txnId);
     const html = generateHostedFormHtml(req.params.txnId);
+    await persistDurableState(req.params.txnId);
     return res.type("html").send(html);
   } catch (error) {
     return res.status(400).send(error.message);
   }
 });
 
-function handleCallbackRequest(req, res) {
+async function handleCallbackRequest(req, res) {
   try {
     console.log("[INFO] CALLBACK_ROUTE_HIT=true");
     const mergedPayload = {
@@ -417,12 +426,18 @@ function handleCallbackRequest(req, res) {
     const userAgent = String(req.headers["user-agent"] || "");
     const isBrowser = /Mozilla\//.test(userAgent) || Boolean(req.headers["sec-fetch-mode"]);
 
+    const candidateTxnId = String(
+      value.MPI_TRXN_ID || value.txnId || value.transactionId || value.purchaseId || ""
+    ).trim();
+    await hydrateDurableState(candidateTxnId);
+
     const txn = processCallback(value, {
       contentType: req.headers["content-type"] || "",
       source: req.ip || "",
       fromBrowser: isBrowser,
       query: req.query || {}
     });
+    await persistDurableState(txn.txnId);
 
     if (isBrowser) {
       return res.redirect(303, `/api/return?txnId=${encodeURIComponent(txn.txnId)}`);
@@ -436,7 +451,8 @@ function handleCallbackRequest(req, res) {
 router.post("/callback", handleCallbackRequest);
 router.get("/callback", handleCallbackRequest);
 
-router.post("/transactions/:txnId/hosted-form-submitted", (req, res) => {
+router.post("/transactions/:txnId/hosted-form-submitted", async (req, res) => {
+  await hydrateDurableState(req.params.txnId);
   const txn = getTxDetail(req.params.txnId);
   if (!txn) {
     return res.status(404).json({ error: "Transaction not found" });
@@ -458,6 +474,7 @@ router.post("/transactions/:txnId/hosted-form-submitted", (req, res) => {
   txn.timeline.hostedSubmitted = "PASS";
   txn.timestamps.hostedFormSubmittedAt = new Date().toISOString();
   saveTransaction(txn);
+  await persistDurableState(txn.txnId);
 
   return res.status(204).end();
 });
@@ -477,6 +494,7 @@ router.get("/return", async (req, res) => {
     transactionId: txnId
   });
 
+  await hydrateDurableState(txnId);
   let txn = getTxDetail(txnId);
   if (!txn) {
     return res.status(404).send("Transaction not found");
@@ -531,10 +549,11 @@ router.get("/return", async (req, res) => {
         : "UNKNOWN (depends on network routing/firewall/reverse proxy)"
   };
 
+  await persistDurableState(txnId);
   return res.type("html").send(renderReturnPage(txn, detail));
 });
 
-router.post("/return", (req, res) => {
+router.post("/return", async (req, res) => {
   const txnId = req.body.txnId || req.query.txnId || req.body.MPI_TRXN_ID;
   logInfo("RETURN_ROUTE_HIT", {
     method: "POST",
@@ -550,6 +569,7 @@ router.post("/return", (req, res) => {
     transactionId: txnId
   });
 
+  await hydrateDurableState(txnId);
   const txn = getTxDetail(txnId);
   if (txn) {
     const fields = {
@@ -589,6 +609,7 @@ router.post("/return", (req, res) => {
     }
 
     saveTransaction(txn);
+    await persistDurableState(txn.txnId);
   }
 
   return res.redirect(303, `/api/return?txnId=${encodeURIComponent(txnId)}`);
@@ -613,8 +634,9 @@ router.post("/transactions/:txnId/inquiry", async (req, res) => {
   }
 });
 
-router.get("/transactions/:txnId/diagnostic", (req, res) => {
+router.get("/transactions/:txnId/diagnostic", async (req, res) => {
   try {
+    await hydrateDurableState(req.params.txnId);
     const report = exportSafeDiagnostic(req.params.txnId);
     return res.json(report);
   } catch (error) {

@@ -12,6 +12,19 @@ const IS_SERVERLESS_RUNTIME = Boolean(
 const UAT_MERCHANT_ID = "863990035600270";
 const STABLE_UAT_BASE_URL = "https://uatipg.vercel.app";
 
+// Every merchant ID the tool is allowed to transact as. A merchant ID only
+// works if Cardzone has it in BOTH the acquirer system and the MPI enrol
+// screen; sending an un-enrolled ID returns "503 Invalid Merchant". Override
+// with UAT_ENROLLED_MERCHANT_IDS (comma separated) once Cardzone confirms
+// which IDs are live in UAT.
+const DEFAULT_ENROLLED_MERCHANT_IDS = ["863990035600270", "863990026500270"];
+const UAT_ENROLLED_MERCHANT_IDS = (
+  process.env.UAT_ENROLLED_MERCHANT_IDS || DEFAULT_ENROLLED_MERCHANT_IDS.join(",")
+)
+  .split(",")
+  .map((value) => value.trim())
+  .filter(Boolean);
+
 const BOOL_TRUE = new Set(["1", "true", "TRUE", "yes", "YES"]);
 
 function toBool(value, defaultValue) {
@@ -43,6 +56,12 @@ const config = Object.freeze({
   PORT: 3000,
   BIND_HOST: process.env.BIND_HOST || "0.0.0.0",
   MERCHANT_ID: process.env.MERCHANT_ID || UAT_MERCHANT_ID,
+  UAT_ENROLLED_MERCHANT_IDS,
+  // Cardzone's public key for verifying the MPIRes / callback MAC. The primary
+  // source is the per-transaction key returned by mkReq; this is the fallback
+  // used when that record is not available (e.g. a callback that lands on a
+  // cold serverless instance with no durable store configured).
+  CARDZONE_PUBLIC_KEY: process.env.CARDZONE_PUBLIC_KEY || "",
   CALLBACK_BASE_URL: process.env.CALLBACK_BASE_URL || STABLE_UAT_BASE_URL,
   RETURN_BASE_URL: process.env.RETURN_BASE_URL || process.env.CALLBACK_BASE_URL || STABLE_UAT_BASE_URL,
   CARDZONE_MKREQ_URL: process.env.CARDZONE_MKREQ_URL || UAT_3DSS_CONFIG.mkReqUrl,
@@ -50,7 +69,12 @@ const config = Object.freeze({
   CARDZONE_INQUIRY_URL: process.env.CARDZONE_INQUIRY_URL || UAT_3DSS_CONFIG.mercReqUrl,
   ENABLE_MKREQ_MAC: toBool(process.env.ENABLE_MKREQ_MAC, false),
   MPI_MAC_INCLUDE_RESPONSE_TYPE: toBool(process.env.MPI_MAC_INCLUDE_RESPONSE_TYPE, false),
-  MPI_MAC_PURCHASE_DATE_TIMEZONE: process.env.MPI_MAC_PURCHASE_DATE_TIMEZONE || "ASIA_THIMPHU",
+  // The MPI_MAC is signed over exactly the MPI_PURCH_DATE that is sent on the
+  // wire (Cardzone rebuilds the canonical string from the received fields).
+  // Leave this empty. It only exists as an escape hatch if Cardzone ever
+  // confirms they normalise the timestamp to a specific zone before checking
+  // the MAC; setting it to ASIA_THIMPHU would shift the signed value +6h.
+  MPI_MAC_PURCHASE_DATE_TIMEZONE: process.env.MPI_MAC_PURCHASE_DATE_TIMEZONE || "",
   MERCHANT_PRIVATE_KEY_PEM_PATH:
     process.env.MERCHANT_PRIVATE_KEY_PEM_PATH ||
     path.join(process.cwd(), "data", "keys", "merchant_private.pem"),
@@ -65,8 +89,16 @@ if (process.env.ENVIRONMENT && process.env.ENVIRONMENT !== "UAT") {
   throw new Error("Only ENVIRONMENT=UAT is allowed for this tool.");
 }
 
-if (config.MERCHANT_ID !== UAT_MERCHANT_ID) {
-  throw new Error(`MERCHANT_ID must be ${UAT_MERCHANT_ID} for this UAT integration.`);
+if (!/^\d{15}$/.test(config.MERCHANT_ID)) {
+  throw new Error("MERCHANT_ID must be a 15-digit numeric Cardzone merchant ID.");
+}
+
+if (!UAT_ENROLLED_MERCHANT_IDS.includes(config.MERCHANT_ID)) {
+  throw new Error(
+    `MERCHANT_ID ${config.MERCHANT_ID} is not listed in UAT_ENROLLED_MERCHANT_IDS ` +
+      `(${UAT_ENROLLED_MERCHANT_IDS.join(", ")}). Confirm the ID is enrolled in ` +
+      "Cardzone's acquirer system and MPI enrol screen before using it."
+  );
 }
 
 if (!config.CARDZONE_MKREQ_URL.includes("uat")) {

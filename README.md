@@ -75,6 +75,9 @@ Use `.env`:
 - `MODE=UAT|MOCK`
 - `PORT`
 - `MERCHANT_ID`
+- `UAT_ENROLLED_MERCHANT_IDS` (comma separated; a merchant ID must be in Cardzone's acquirer system **and** MPI enrol screen or `mercReq` returns `503 Invalid Merchant`)
+- `CARDZONE_PUBLIC_KEY` (Base64URL SPKI; fallback for verifying callback/MPIRes MAC when the per-transaction mkReq key is unavailable)
+- `KV_REST_API_URL` / `KV_REST_API_TOKEN` (Vercel KV / Upstash Redis REST; durable cross-request state, see below)
 - `CARDZONE_MKREQ_URL`
 - `CARDZONE_MERC_REQ_URL`
 - `CARDZONE_INQUIRY_URL`
@@ -83,7 +86,7 @@ Use `.env`:
 - `APP_VERSION` (optional deploy/version label)
 - `ENABLE_MKREQ_MAC=false`
 - `MPI_MAC_INCLUDE_RESPONSE_TYPE=false`
-- `MPI_MAC_PURCHASE_DATE_TIMEZONE=ASIA_THIMPHU`
+- `MPI_MAC_PURCHASE_DATE_TIMEZONE` (leave empty; escape hatch only)
 - `CALLBACK_BASE_URL`
 - `RETURN_BASE_URL`
 - `USE_CARDZONE_PROXY=true|false`
@@ -116,9 +119,10 @@ Localhost note:
 - `CARDZONE_MERC_REQ_URL=https://uatczsecure.bob.bt/3dss/mercReq`
 - `CARDZONE_INQUIRY_URL=https://uatczsecure.bob.bt/3dss/mercReq`
 - `MPI_MAC_INCLUDE_RESPONSE_TYPE=false`
-- `MPI_MAC_PURCHASE_DATE_TIMEZONE=ASIA_THIMPHU`
+- `MPI_MAC_PURCHASE_DATE_TIMEZONE=` (empty; MAC is signed over the wire `MPI_PURCH_DATE` unchanged)
 - `RETURN_BASE_URL=https://uatipg.vercel.app`
 - `CALLBACK_BASE_URL=https://uatipg.vercel.app`
+- `KV_REST_API_URL=` / `KV_REST_API_TOKEN=` (set to a Vercel KV store for a reliable serverless flow)
 
 ## UAT Endpoints
 
@@ -183,6 +187,14 @@ Payload:
 - Empty fields are included as empty strings and not skipped.
 - Signature algorithm: SHA256withRSA.
 - Signature encoding: Base64URL without padding.
+- `MPI_PURCH_DATE` is Bank of Bhutan local time (Asia/Thimphu, UTC+6) and the
+  MAC is signed over exactly that wire value (no timezone transform).
+- Hosted Payment Page: `MPI_PAN`, `MPI_CARD_HOLDER_NAME`, `MPI_PAN_EXP` and
+  `MPI_CVV2` are always sent empty and signed empty (card data is entered on
+  the Cardzone page). Sending or signing a value in these positions causes a
+  `5A0` MAC mismatch.
+- `mercReq` is form-posted into an HTML iframe (per Cardzone spec rev 2.3),
+  not a top-level redirect.
 
 ## Callback
 
@@ -237,6 +249,21 @@ Message shown:
 - Serverless runtime (for example Vercel): `${os.tmpdir()}/uat-ipg-testing/data/transactions`
 - Override data root with `DATA_DIR` when needed.
 - File pattern: `txn_<transactionId>.json`
+
+### Durable state (serverless)
+
+One payment spans several independent HTTP hits (hosted-form GET, Cardzone
+server callback, browser return, inquiry). On Vercel each can run on a
+different instance with a cold `os.tmpdir()`, so the filesystem/memory store
+alone loses the signing key, the Cardzone public key and the transaction
+record between hits, and callbacks then fail MAC verification.
+
+Set `KV_REST_API_URL` + `KV_REST_API_TOKEN` (Vercel KV) or
+`UPSTASH_REDIS_REST_URL` + `UPSTASH_REDIS_REST_TOKEN` (Upstash) to persist that
+state (keys `uat:txn:<id>` and `uat:key:<id>`, 24h TTL). With no store
+configured the tool falls back to the local filesystem/memory behaviour, which
+is only reliable for a single long-lived process. `GET /api/config` reports
+`durableStateStore: "kv-rest" | "ephemeral-tmp"`.
 
 ## API Summary
 

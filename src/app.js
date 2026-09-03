@@ -19,6 +19,10 @@ function buildCspHeaderValue() {
     "img-src * 'self' data: blob:",
     "font-src 'self' data:",
     "form-action 'self' https://uatczsecure.bob.bt",
+    // The hosted-payment page posts MPIReq into an iframe that loads the
+    // Cardzone UAT card-entry / OTP screens.
+    "frame-src 'self' https://uatczsecure.bob.bt",
+    "child-src 'self' https://uatczsecure.bob.bt",
     "frame-ancestors *"
   ].join("; ");
 }

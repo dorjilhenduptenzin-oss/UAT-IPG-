@@ -10,7 +10,7 @@ const {
 } = require("../crypto/rsa");
 const { doMkReq, doFormPost } = require("../cardzone/client");
 const {
-  formatUtcPurchaseDate,
+  formatPurchaseDate,
   canonicalMpiPurchaseDateForCardzoneMac,
   buildMpiLineItem,
   generateMpiMac,
@@ -27,12 +27,16 @@ const {
   saveTransaction,
   loadTransaction,
   transactionExists,
-  listRecentTransactions
+  listRecentTransactions,
+  hydrateFromDurable,
+  persistToDurable
 } = require("../storage/transactions");
+const { durableEnabled, durableGet, durableSet } = require("../storage/durable");
 
 const keyRegistry = new Map();
 const runtimeMpiRegistry = new Map();
 const MAC_WIRE_PURCHASE_DATE_OPTIONS = Object.freeze({ purchaseDateTimezone: null });
+const DURABLE_KEY_PREFIX = "uat:key:";
 
 const CURRENCY_CONFIG = Object.freeze({
   "840": { alpha: "USD", minorDigits: 2 },
@@ -59,6 +63,55 @@ function loadTxnPrivateKey(txnId) {
   const keyPath = getTxnPrivateKeyPath(txnId);
   if (!fs.existsSync(keyPath)) return null;
   return fs.readFileSync(keyPath, "utf8");
+}
+
+/**
+ * Pull the per-transaction signing key from the durable store into the local
+ * key registry. Needed so the inquiry MAC (signed after the browser has left
+ * the merchant) can still be produced on a cold serverless invocation.
+ */
+async function hydrateKeyRegistry(txnId) {
+  if (!durableEnabled() || !txnId || keyRegistry.has(txnId)) {
+    return;
+  }
+  const record = await durableGet(DURABLE_KEY_PREFIX + txnId);
+  if (record && record.privateKeyPem && record.publicKeyBase64Url) {
+    keyRegistry.set(txnId, {
+      privateKeyPem: record.privateKeyPem,
+      publicKeyBase64Url: record.publicKeyBase64Url
+    });
+  }
+}
+
+async function persistKeyRegistry(txnId) {
+  if (!durableEnabled() || !txnId) {
+    return;
+  }
+  const record = keyRegistry.get(txnId);
+  if (record && record.privateKeyPem && record.publicKeyBase64Url) {
+    await durableSet(DURABLE_KEY_PREFIX + txnId, {
+      privateKeyPem: record.privateKeyPem,
+      publicKeyBase64Url: record.publicKeyBase64Url
+    });
+  }
+}
+
+/**
+ * Rehydrate every piece of cross-invocation state for a transaction (record +
+ * signing key) before a synchronous service call reads it. Call sites are the
+ * async route handlers and the async service entry points (runMkReq / runInquiry).
+ */
+async function hydrateDurableState(txnId) {
+  if (!txnId) return;
+  await hydrateFromDurable(txnId);
+  await hydrateKeyRegistry(txnId);
+}
+
+/** Flush transaction record + signing key back to the durable store. */
+async function persistDurableState(txnId) {
+  if (!txnId) return;
+  await persistToDurable(txnId);
+  await persistKeyRegistry(txnId);
 }
 
 function normalizeCurrencyCode(code) {
@@ -191,14 +244,14 @@ function createTransaction(input) {
   const amountMajor = Number(input.amountMajor || 1.0).toFixed(2);
   const amountMinor = toMinorUnits(amountMajor, currency);
   const requestedMerchantId = String(input.merchantId || "").trim();
-  const allowedMerchants = new Set([
-    config.MERCHANT_ID,
-    "863990035600270",
-    "863990026500270"
-  ].filter(Boolean));
+  const allowedMerchants = new Set(
+    [config.MERCHANT_ID, ...config.UAT_ENROLLED_MERCHANT_IDS].filter(Boolean)
+  );
   const effectiveMerchantId = requestedMerchantId || config.MERCHANT_ID;
   if (requestedMerchantId && !allowedMerchants.has(requestedMerchantId)) {
-    throw new Error(`merchantId must match configured UAT merchant: ${config.MERCHANT_ID} or 863990026500270`);
+    throw new Error(
+      `merchantId must be one of the enrolled UAT merchant IDs: ${[...allowedMerchants].join(", ")}`
+    );
   }
   const callbackBaseUrl = String(config.CALLBACK_BASE_URL || "https://uatipg.vercel.app").replace(/\/+$/, "");
   const returnBaseUrl = String(input.returnBaseUrl || config.RETURN_BASE_URL || "https://uatipg.vercel.app").replace(/\/+$/, "");
@@ -213,7 +266,10 @@ function createTransaction(input) {
     txnId,
     orderRef: input.orderRef || txnId,
     merchantId: effectiveMerchantId,
-    mpiPurchaseDate: formatUtcPurchaseDate(now),
+    // MPI_PURCH_DATE is "the timestamp when merchant sends the transaction".
+    // Cardzone (Bank of Bhutan) runs on Bhutan time (UTC+6), so send local
+    // Thimphu time, not UTC. The MPI_MAC is signed over this exact value.
+    mpiPurchaseDate: formatPurchaseDate(now),
     amountMinor,
     amountMajor,
     currency,
@@ -385,6 +441,7 @@ function extractCardzonePublicKey(mkReqResponse, fallbackPub) {
 }
 
 async function runMkReq(txnId) {
+  await hydrateDurableState(txnId);
   const txn = loadTransaction(txnId);
   if (!txn) throw new Error("Transaction not found.");
 
@@ -454,6 +511,7 @@ async function runMkReq(txnId) {
   txn.mkReq.cardzonePublicKey = extractCardzonePublicKey(txn.mkReq.response, keys.publicKeyBase64Url);
   txn.timestamps.mkReqResponseAt = new Date().toISOString();
   saveTransaction(txn);
+  await persistDurableState(txn.txnId);
 
   return txn;
 }
@@ -494,8 +552,8 @@ function orderedDiagnosticFields(fieldsSafe) {
     "MPI_MOBILE_PHONE",
     "MPI_MOBILE_PHONE_CC",
     "MPI_LINE_ITEM",
-    "MPI_RESPONSE_LINK",
-    "MPI_RESPONSE_TYPE"
+    "MPI_RESPONSE_TYPE",
+    "MPI_RESPONSE_LINK"
   ];
 
   return order.map((name, idx) => ({
@@ -506,10 +564,11 @@ function orderedDiagnosticFields(fieldsSafe) {
 }
 
 function buildInquiryPurchaseId(originalTxnId) {
-  const digits = String(originalTxnId || "").replace(/\D/g, "");
-  if (!digits) {
+  if (!String(originalTxnId || "").trim()) {
     throw new Error("Cannot build inquiry purchaseId: original transaction ID is missing.");
   }
+  // Each inquiry needs its own unique transaction number; the original txn is
+  // referenced separately via MPI_ORI_TRXN_ID.
   return generateTransactionId();
 }
 
@@ -559,16 +618,34 @@ function buildMpiReq(txnId, cardInput) {
 
   const responseType = (cardInput.responseType || "STRING").toUpperCase();
   if (!/^\d{14}$/.test(String(txn.mpiPurchaseDate || ""))) {
-    txn.mpiPurchaseDate = formatUtcPurchaseDate();
+    txn.mpiPurchaseDate = formatPurchaseDate();
   }
   const wirePurchaseDate = String(txn.mpiPurchaseDate);
+
+  // This tool always uses the Hosted Payment Page: the cardholder types PAN,
+  // name, expiry and CVV on Cardzone's own screen. The spec marks all four as
+  // "Not Required for Hosted Payment Page", and Cardzone rebuilds the MPI_MAC
+  // canonical string with these positions empty. Sending or signing any value
+  // here produces a MAC mismatch (5A0), so they are forced blank.
+  const suppliedCardData =
+    String(cardInput.cardNumber || "") ||
+    String(cardInput.cardHolderName || "") ||
+    String(cardInput.expiry || "") ||
+    String(cardInput.cvv || "");
+  if (suppliedCardData) {
+    logInfo("UAT_HOSTED_PAGE_CARD_DATA_IGNORED", {
+      transactionId: txn.txnId,
+      note: "PAN/holder name/expiry/CVV are collected on the Cardzone hosted page and are excluded from MPIReq and the MPI_MAC."
+    });
+  }
+
   const mpiFields = {
     MPI_TRANS_TYPE: "SALES",
     MPI_MERC_ID: txn.merchantId,
-    MPI_PAN: String(cardInput.cardNumber || "").replace(/\s+/g, ""),
-    MPI_CARD_HOLDER_NAME: cardInput.cardHolderName || txn.customer.name || "",
-    MPI_PAN_EXP: cardInput.expiry || "",
-    MPI_CVV2: cardInput.cvv || "",
+    MPI_PAN: "",
+    MPI_CARD_HOLDER_NAME: "",
+    MPI_PAN_EXP: "",
+    MPI_CVV2: "",
     MPI_TRXN_ID: txn.txnId,
     MPI_ORI_TRXN_ID: cardInput.originalTxnId || "",
     MPI_PURCH_DATE: wirePurchaseDate,
@@ -797,14 +874,28 @@ function generateHostedFormHtml(txnId) {
     browserReturnUrl: txn.browserReturnUrl || `${String(config.RETURN_BASE_URL).replace(/\/+$/, "")}/api/return?txnId=${txn.txnId}`
   });
 
+    // Per the Cardzone spec (revision 2.3) MPIReq must be form-posted into an
+    // HTML iframe (inline or lightbox) as EMVCo requires, not via a top-level
+    // redirect. The form targets the inline iframe below; Cardzone's card-entry
+    // and OTP screens render inside it and the cardholder sees them there.
     return `<!doctype html>
   <html>
-  <head><meta charset=\"utf-8\" /><title>Cardzone UAT Redirect</title></head>
+  <head>
+    <meta charset=\"utf-8\" />
+    <meta name=\"viewport\" content=\"width=device-width, initial-scale=1\" />
+    <title>Cardzone UAT Hosted Payment</title>
+    <style>
+      body { font-family: Segoe UI, Arial, sans-serif; margin: 0; background: #f6f8fb; }
+      .bar { padding: 10px 16px; font-size: 14px; color: #334155; }
+      #cardzoneFrame { display: block; width: 100%; height: calc(100vh - 40px); border: 0; background: #fff; }
+    </style>
+  </head>
   <body>
-    <h3>Redirecting to Cardzone UAT hosted payment page...</h3>
-    <form id=\"mercReqForm\" method=\"POST\" action=\"${escapeHtml(config.CARDZONE_MERC_REQ_URL)}\">${inputs}</form>
-    <script src="/autopost.js"></script>
-    <noscript><button type="submit" form="mercReqForm">Continue to Cardzone</button></noscript>
+    <div class=\"bar\">Complete your card details on the Cardzone secure page below. Do not refresh or close this window.</div>
+    <form id=\"mercReqForm\" method=\"POST\" action=\"${escapeHtml(config.CARDZONE_MERC_REQ_URL)}\" target=\"cardzoneFrame\">${inputs}</form>
+    <iframe id=\"cardzoneFrame\" name=\"cardzoneFrame\" title=\"Cardzone secure payment\"></iframe>
+    <script src=\"/autopost.js\"></script>
+    <noscript><button type=\"submit\" form=\"mercReqForm\">Continue to Cardzone</button></noscript>
   </body>
   </html>`;
 }
@@ -833,17 +924,17 @@ function processCallback(formData, metadata = {}) {
 
   let txn = rawTxnId ? loadTransaction(rawTxnId) : null;
   if (!txn) {
-    const recent = listRecentTransactions(1);
-    if (!rawTxnId && recent.length > 0) {
-      txn = recent[0];
-    } else {
+    // Never attach a callback to an unrelated "most recent" transaction: on a
+    // shared or serverless instance that mis-binds concurrent payments. Build a
+    // recovery record keyed by the transaction ID Cardzone actually sent.
+    {
       const recoveryId = rawTxnId || generateTransactionId();
       const now = new Date();
       txn = {
         txnId: recoveryId,
         orderRef: recoveryId,
         merchantId: String(formData.MPI_MERC_ID || config.MERCHANT_ID || "").trim() || config.MERCHANT_ID,
-        mpiPurchaseDate: formatUtcPurchaseDate(now),
+        mpiPurchaseDate: formatPurchaseDate(now),
         amountMinor: 100,
         amountMajor: "1.00",
         currency: "840",
@@ -937,7 +1028,17 @@ function processCallback(formData, metadata = {}) {
   txn.timeline.callbackReceived = "PASS";
   txn.callbackReceived = true;
 
-  const cardzonePub = txn.mkReq?.cardzonePublicKey || txn.mkReq?.request?.pubKey;
+  const cardzonePub =
+    txn.mkReq?.cardzonePublicKey ||
+    config.CARDZONE_PUBLIC_KEY ||
+    txn.mkReq?.request?.pubKey ||
+    "";
+  if (!cardzonePub) {
+    logInfo("CALLBACK_MAC_KEY_UNAVAILABLE", {
+      transactionId: txnId,
+      note: "No Cardzone public key available (mkReq record lost and CARDZONE_PUBLIC_KEY not set); callback MAC cannot be verified."
+    });
+  }
   const verified = verifyCallbackMac(cardzonePub, callbackFields, callbackFields.MPI_MAC);
   txn.callback.macVerified = verified.ok;
   txn.callbackMacVerified = verified.ok;
@@ -1084,6 +1185,7 @@ function processCallback(formData, metadata = {}) {
 }
 
 async function runInquiry(txnId) {
+  await hydrateDurableState(txnId);
   const txn = loadTransaction(txnId);
   if (!txn) throw new Error("Transaction not found.");
 
@@ -1104,7 +1206,7 @@ async function runInquiry(txnId) {
     MPI_CVV2: "",
     MPI_TRXN_ID: inquiryPurchaseId,
     MPI_ORI_TRXN_ID: txn.txnId,
-    MPI_PURCH_DATE: formatUtcPurchaseDate(),
+    MPI_PURCH_DATE: formatPurchaseDate(),
     MPI_PURCH_CURR: "",
     MPI_PURCH_AMT: "",
     MPI_ADDR_MATCH: "",
@@ -1231,6 +1333,7 @@ async function runInquiry(txnId) {
   }
 
   saveTransaction(txn);
+  await persistDurableState(txn.txnId);
   return txn;
 }
 
@@ -1265,6 +1368,9 @@ function getConfigView() {
     mode: config.MODE,
     bindHost: config.BIND_HOST,
     merchantId: config.MERCHANT_ID,
+    enrolledMerchantIds: config.UAT_ENROLLED_MERCHANT_IDS,
+    cardzonePublicKeyConfigured: Boolean(config.CARDZONE_PUBLIC_KEY),
+    durableStateStore: durableEnabled() ? "kv-rest" : "ephemeral-tmp",
     callbackBaseUrl: config.CALLBACK_BASE_URL,
     returnBaseUrl: config.RETURN_BASE_URL,
     callbackEndpoint: `${config.CALLBACK_BASE_URL}/api/callback`,
@@ -1345,5 +1451,7 @@ module.exports = {
   saveUatPrivateKeyIfGenerated,
   loadTxnPrivateKey,
   getOrLoadKeyData,
+  hydrateDurableState,
+  persistDurableState,
   CURRENCY_CONFIG
 };
