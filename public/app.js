@@ -59,9 +59,11 @@ function bindButtons() {
   const merchantSelect = document.getElementById("merchantId");
   const currencySelect = document.getElementById("currency");
 
+  const INR_MERCHANTS = ["863990026500270", "863990031500270"];
+
   merchantSelect.addEventListener("change", (e) => {
     const selectedMid = e.target.value;
-    if (selectedMid === "863990026500270") {
+    if (INR_MERCHANTS.includes(selectedMid)) {
       currencySelect.value = "356";
     } else if (selectedMid === "863990035600270") {
       currencySelect.value = "840";
@@ -72,7 +74,10 @@ function bindButtons() {
   currencySelect.addEventListener("change", (e) => {
     const selectedCurr = e.target.value;
     if (selectedCurr === "356") {
-      merchantSelect.value = "863990026500270";
+      // Keep the current INR merchant if one is already selected.
+      if (!INR_MERCHANTS.includes(merchantSelect.value)) {
+        merchantSelect.value = "863990026500270";
+      }
     } else if (selectedCurr === "840") {
       merchantSelect.value = "863990035600270";
     }

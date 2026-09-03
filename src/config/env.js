@@ -17,7 +17,11 @@ const STABLE_UAT_BASE_URL = "https://uatipg.vercel.app";
 // screen; sending an un-enrolled ID returns "503 Invalid Merchant". Override
 // with UAT_ENROLLED_MERCHANT_IDS (comma separated) once Cardzone confirms
 // which IDs are live in UAT.
-const DEFAULT_ENROLLED_MERCHANT_IDS = ["863990035600270", "863990026500270"];
+const DEFAULT_ENROLLED_MERCHANT_IDS = [
+  "863990035600270", // USD
+  "863990026500270", // INR
+  "863990031500270"  // INR
+];
 const UAT_ENROLLED_MERCHANT_IDS = (
   process.env.UAT_ENROLLED_MERCHANT_IDS || DEFAULT_ENROLLED_MERCHANT_IDS.join(",")
 )

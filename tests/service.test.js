@@ -194,10 +194,12 @@ test("duplicate transaction protection triggers when id already exists", () => {
 test("only enrolled UAT merchant IDs are accepted", () => {
   expect(() =>
     createTransaction({ merchantId: "863990030700270", amountMajor: 1, currency: "840" })
-  ).toThrow("merchantId must be one of the enrolled UAT merchant IDs: 863990035600270, 863990026500270");
+  ).toThrow(
+    "merchantId must be one of the enrolled UAT merchant IDs: 863990035600270, 863990026500270, 863990031500270"
+  );
 
-  const inr = createTransaction({ merchantId: "863990026500270", amountMajor: 1, currency: "356" });
-  expect(inr.merchantId).toBe("863990026500270");
+  const inr = createTransaction({ merchantId: "863990031500270", amountMajor: 1, currency: "356" });
+  expect(inr.merchantId).toBe("863990031500270");
 });
 
 test("buildMpiReq aborts when mkReq pubkey differs from signing private key", async () => {
