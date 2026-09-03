@@ -616,7 +616,6 @@ function buildMpiReq(txnId, cardInput) {
     throw new Error("Aborted: mkReq public key fingerprint does not match signing private-key-derived public key fingerprint.");
   }
 
-  const responseType = (cardInput.responseType || "STRING").toUpperCase();
   if (!/^\d{14}$/.test(String(txn.mpiPurchaseDate || ""))) {
     txn.mpiPurchaseDate = formatPurchaseDate();
   }
@@ -674,8 +673,12 @@ function buildMpiReq(txnId, cardInput) {
     MPI_MOBILE_PHONE: txn.customer.mobilePhone || "",
     MPI_MOBILE_PHONE_CC: cardInput.mobilePhoneCc || "",
     MPI_LINE_ITEM: buildMpiLineItem(cardInput.lineItems || []),
-    MPI_RESPONSE_LINK: txn.mpiResponseLink || txn.responseUrl,
-    MPI_RESPONSE_TYPE: responseType
+    MPI_RESPONSE_LINK: txn.mpiResponseLink || txn.responseUrl
+    // MPI_RESPONSE_TYPE is intentionally omitted: the spec says it is "Not
+    // applicable for SALES", and sending STRING/JSON makes Cardzone return raw
+    // data to the browser instead of the HTML redirect back to
+    // MPI_RESPONSE_LINK. SALES therefore uses the default (HTML with callback
+    // URL). It is still set for INQ in runInquiry.
   };
 
   const mac = generateMpiMac(keyData.privateKeyPem, mpiFields, MAC_WIRE_PURCHASE_DATE_OPTIONS);
